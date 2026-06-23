@@ -171,16 +171,15 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 
 ### Visualization ideas for Scientific Data paper
 
-1. **Site map**: Map of all real mini-grids by country, colored by capacity (kWp)
-2. **Dataset timeline**: Gantt-style chart showing data coverage per site vs. commissioning date
-3. **Customer growth curve**: Cumulative customers over time per country, broken down by customerType
-4. **Energy consumption heatmap**: Average hourly consumption by day-of-week and hour-of-day across sites
-5. **Payment volume time series**: Monthly payment volume (local currency) by country/processor
-6. **Tariff evolution**: Rate per kWh over time per site
-7. **Battery SOC distribution**: From `vrmgeneration`, histogram of battery state-of-charge across sites
-8. **Data completeness matrix**: Table × site × year showing % completeness
-9. **Meter uptime**: From `sparkmeterreadings` `uptime` field, mean uptime by site over time
-10. **Household size distribution**: From `customers`, stacked bar of male/female/other by customerType
+1. **ARPU and ACPU** over time for different customer types and geographies
+2. **Load profiles** of archetypical customers, average 24-hour profile
+3. **Comparison** of customer consumption behavior to equivalent data from major cities, rural US farming communities, etc.
+4. **Tariff evolution**: Rate per kWh over time per site
+5. **Data completeness matrix**: Table × site × year showing % completeness
+6. **Meter uptime**: From `sparkmeterreadings` `uptime` field, mean uptime by site over time
+7. **Carbon accounting** per kWp capacity, per customer, and per USD CAPEX using the UNFCCC AMS-III.BB.
+8. **Power quality**: average voltage vs. power factor, histograms of minimum, average, and maximum voltages
+9. **Grid losses**: histogram of percentage of power lost
 
 ---
 
