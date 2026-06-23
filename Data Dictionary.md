@@ -358,6 +358,31 @@
 
 ---
 
+## Derived dataset: sparkmeterreadings_clean
+**Source**: Generated from `sparkmeterreadings` by `clean_readings.py`. One parquet file per site (`data/sparkmeterreadings_clean/<site>.parquet`).
+
+**Purpose**: Clean 15-minute per-slot energy time series. The raw `sparkmeterreadings` table records cumulative energy counters (`energy`) and per-heartbeat increments (`kilowattHours`), but meters frequently miss heartbeats, making the per-heartbeat column unreliable for multi-slot gaps. This dataset reconstructs the full time series by differencing the cumulative counter and redistributing gap energy proportionally using a customer-specific daily load profile.
+
+**Processing steps**:
+1. Sort readings by `heartbeatStart` per meter.
+2. Diff the cumulative `energy` counter to get per-transition consumption.
+3. Null transitions where `energy_diff < 0` (meter reset) or `state ≠ 1` at either endpoint (error/off/unknown state).
+4. Build a 96-slot daily load profile from consecutive clean single-slot transitions.
+5. For multi-slot gaps with a known total, redistribute energy proportionally using the load profile. Slots whose time-of-day bucket has no clean observations fall back to a uniform (constant) rate.
+6. Null-diff transitions produce no output rows (absent from the clean series).
+
+**Energy conservation**: The sum of `energy_kwh` in the output equals the sum of valid raw energy diffs to within 1 × 10⁻⁵ relative tolerance.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| meter_customer_code | string | **[PSEUDONYMIZE]** Customer account code (matches `sparkmeterreadings.meter_customer_code`) |
+| meter_type | string | Meter role: `customer`, `totalizer`, or `pue` |
+| slot_start | timestamp (UTC, ns) | UTC start of the 15-minute slot |
+| energy_kwh | float64 | Energy consumed during this slot (kWh) |
+| imputation_method | string | `observed`: direct single-slot meter reading; `profile`: redistributed from a multi-slot gap using the customer's daily load profile; `uniform`: redistributed from a multi-slot gap using a uniform rate (no profile data for this time-of-day slot) |
+
+---
+
 ## Table: sparkmetertransactions
 **Purpose**: Financial transactions from the SparkMeter platform (payments, reversals, balance transfers). ~1.35 million rows.
 
