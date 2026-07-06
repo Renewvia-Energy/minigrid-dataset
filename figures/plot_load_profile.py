@@ -7,14 +7,14 @@ Customers are identified by joining to the raw SparkMeter tariff names
 The UTC offset is looked up from minigridprojects unless overridden.
 
 Usage:
-  python plot_load_profile.py <parquet_file> [<parquet_file> ...] <tariff> [options]
+  python figures/plot_load_profile.py <parquet_file> [<parquet_file> ...] <tariff> [options]
 
 Examples:
-  python plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Residential
-  python plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Shop --hourly
-  python plot_load_profile.py data/sparkmeterreadings_clean/Akipelai.parquet Residential --utc-offset 3
-  python plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Residential --spread median --hourly
-  python plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet data/sparkmeterreadings_clean/Akipelai.parquet Residential --hourly
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Residential
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Shop --hourly
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Akipelai.parquet Residential --utc-offset 3
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Residential --spread median --hourly
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet data/sparkmeterreadings_clean/Akipelai.parquet Residential --hourly
 
 Optional arguments:
   --utc-offset INT    UTC offset in hours (applied to all sites; default: looked up per site)
@@ -249,7 +249,9 @@ suffix = (
     + ("_hourly" if args.hourly else "")
     + ("_median" if args.spread == "median" else "_mean_ci")
 )
-outfile = f"{site_slug}_{tariff_slug}_load_profile{suffix}.png"
+OUT_DIR = Path("../paper/graphics")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+outfile = OUT_DIR / f"{site_slug}_{tariff_slug}_load_profile{suffix}.png"
 
 time_unit = "hour" if args.hourly else "15 min"
 ylabel = f"{centre_label} energy (Wh per {time_unit})"
@@ -290,4 +292,4 @@ ax.text(
 
 plt.tight_layout()
 plt.savefig(outfile, dpi=150)
-print(f"Saved {outfile}")
+print(f"Saved {outfile.resolve()}")

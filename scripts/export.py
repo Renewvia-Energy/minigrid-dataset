@@ -9,7 +9,7 @@ For each included table:
   - Writes Parquet to output/<table>/ (sparkmeterreadings split by site+year)
 
 Run with:
-    conda run -n base python3 export.py [--output-dir output] [--dry-run]
+    conda run -n base python3 scripts/export.py [--output-dir output] [--dry-run]
 """
 
 import argparse

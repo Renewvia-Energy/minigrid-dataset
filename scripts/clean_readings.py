@@ -21,10 +21,13 @@ Output columns per site (data/sparkmeterreadings_clean/<site>.parquet):
   slot_start            UTC start of the 15-minute slot (matches heartbeatStart)
   energy_kwh            energy consumed during this slot (kWh)
   imputation_method     'observed' | 'profile' | 'uniform'
+  tariff                most-common tariff name for this customer (e.g. 'Residential')
 
 Usage:
-  python clean_readings.py            # process all sites
-  python clean_readings.py <site>     # process one site by name (e.g. Akipelai)
+  python scripts/clean_readings.py                    # process all sites (skip existing)
+  python scripts/clean_readings.py <site>             # process one site by name (e.g. Akipelai)
+  python scripts/clean_readings.py --overwrite        # reprocess all sites
+  python scripts/clean_readings.py <site> --overwrite # reprocess one site
 """
 
 import glob
@@ -44,7 +47,7 @@ SLOT_NS = SLOT_MINUTES * 60 * 1_000_000_000  # nanoseconds per slot
 
 INPUT_DIR = Path("data/sparkmeterreadings")
 OUTPUT_DIR = Path("data/sparkmeterreadings_clean")
-COLS = ["meter_customer_code", "meter_type", "heartbeatStart", "energy", "state"]
+COLS = ["meter_customer_code", "meter_type", "heartbeatStart", "energy", "state", "meter_tariff_name"]
 
 OUTPUT_SCHEMA = pa.schema([
     pa.field("meter_customer_code", pa.string()),
@@ -52,6 +55,7 @@ OUTPUT_SCHEMA = pa.schema([
     pa.field("slot_start", pa.timestamp("ns")),
     pa.field("energy_kwh", pa.float64()),
     pa.field("imputation_method", pa.string()),
+    pa.field("tariff", pa.string()),
 ])
 
 
@@ -220,6 +224,13 @@ def process_site(site_dir: Path, output_path: Path) -> None:
     df["meter_customer_code"] = df["meter_customer_code"].astype("category")
     df["meter_type"] = df["meter_type"].astype("category")
 
+    # Most-common tariff per customer (constant per output row)
+    tariff_map = (
+        df.groupby("meter_customer_code", observed=True)["meter_tariff_name"]
+        .agg(lambda s: s.dropna().mode().iloc[0] if s.dropna().any() else "Unknown")
+        .to_dict()
+    )
+
     groups = list(df.groupby(
         ["meter_customer_code", "meter_type"], observed=True, sort=False
     ))
@@ -238,12 +249,14 @@ def process_site(site_dir: Path, output_path: Path) -> None:
             if len(slot_ns) == 0:
                 continue
 
+            tariff = tariff_map.get(code, "Unknown")
             batch = pa.table({
                 "meter_customer_code": pa.array([code] * len(slot_ns), pa.string()),
                 "meter_type": pa.array([mtype] * len(slot_ns), pa.string()),
                 "slot_start": pa.array(slot_ns, pa.timestamp("ns")),
                 "energy_kwh": pa.array(ekwh, pa.float64()),
                 "imputation_method": pa.array(methods, pa.string()),
+                "tariff": pa.array([tariff] * len(slot_ns), pa.string()),
             })
             writer.write_table(batch)
             n_rows_out += len(slot_ns)
@@ -267,8 +280,12 @@ def main() -> None:
         d for d in INPUT_DIR.iterdir() if d.is_dir() and not d.name.startswith(".")
     )
 
-    if len(sys.argv) > 1:
-        name = sys.argv[1]
+    args = sys.argv[1:]
+    overwrite = "--overwrite" in args
+    args = [a for a in args if a != "--overwrite"]
+
+    if args:
+        name = args[0]
         matching = [d for d in all_sites if d.name == name]
         if not matching:
             print(f"No site named '{name}'. Available sites:")
@@ -283,7 +300,7 @@ def main() -> None:
 
     for site_dir in sites:
         output_path = OUTPUT_DIR / f"{site_dir.name}.parquet"
-        if output_path.exists():
+        if output_path.exists() and not overwrite:
             print(f"  [skip] {site_dir.name}")
             continue
         print(f"  [proc] {site_dir.name}")
