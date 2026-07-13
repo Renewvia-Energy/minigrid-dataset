@@ -195,7 +195,12 @@ arpu["date_range_months"] = (
     + 1
 )
 
-print(f"  {len(arpu):,} unique customers")
+MIN_SITE_N = 30
+site_counts = arpu.groupby(["country", "projectName"])["customerAccountNumber"].nunique()
+valid = site_counts[site_counts >= MIN_SITE_N].reset_index()[["country", "projectName"]]
+arpu = arpu.merge(valid, on=["country", "projectName"], how="inner")
+
+print(f"  {len(arpu):,} unique customers (sites with n<{MIN_SITE_N} excluded)")
 for country in COUNTRIES:
     sub = arpu[arpu["country"] == country]
     print(f"  {country}: {len(sub):,} customers, "
@@ -224,7 +229,7 @@ for ax, country in zip(axes, COUNTRIES):
                    label=f"{cls} mean: {d.mean():.2f}", zorder=zorder + 1)
 
     ax.set_xscale("log")
-    ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}" if x >= 1 else f"{x:g}"))
     ax.set_xlabel(f"ARPU ({curr}/month, log scale)", fontsize=10)
     ax.set_ylabel("Density", fontsize=10)
     ax.set_title(country, fontsize=11)
@@ -287,7 +292,7 @@ for ax, country in zip(axes, COUNTRIES):
     ax.set_xlabel(f"ARPU ({curr}/month)", fontsize=10)
     ax.set_title(country, fontsize=11)
     ax.set_xscale("log")
-    ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}" if x >= 1 else f"{x:g}"))
     ax.grid(axis="x", linewidth=0.4, alpha=0.5)
 
 if args.convert_usd:
