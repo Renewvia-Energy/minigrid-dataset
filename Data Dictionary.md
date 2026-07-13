@@ -166,7 +166,7 @@
 | currency | varchar(45) | Transaction currency (KES or NGN) |
 | amount | decimal(12,2) | Payment amount in local currency |
 | renewviaAmount | decimal(12,2) | Amount credited to Renewvia after fees |
-| isCredit | tinyint | 1 if this credits the customer's meter account |
+| isCredit | tinyint | Unused; is either null or 0 for all transactions |
 | isProcessorTest | tinyint | 1 if this is a test transaction from the payment processor |
 | invoiceNumber | varchar(100) | **[EXCLUDE]** IUO |
 | thirdPartyTransactionID | varchar(100) | **[EXCLUDE]** IUO |
@@ -213,7 +213,7 @@
 | currency | varchar(45) | Transaction currency |
 | amount | decimal(12,2) | Payment amount in local currency |
 | renewviaAmount | decimal(12,2) | Amount credited to Renewvia after fees |
-| isCredit | tinyint | 1 if this is a credit |
+| isCredit | tinyint | Unused; is either null or 0 for all transactions |
 | isProcessorTest | tinyint | 1 if this is a test transaction |
 | invoiceNumber | varchar(100) | **[EXCLUDE]** IUO |
 | thirdPartyTransactionID | varchar(100) | **[EXCLUDE]** IUO |

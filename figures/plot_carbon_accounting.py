@@ -29,23 +29,15 @@ PANELS = [
 ]
 
 
-def is_uuid(name: str) -> bool:
-    return len(name) == 36 and name.count("-") == 4
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-kalobeyei", action="store_true",
                         help="Exclude Kalobeyei Settlement from all plots")
-    parser.add_argument("--no-uuid", action="store_true",
-                        help="Exclude projects whose name is a UUID")
     args = parser.parse_args()
 
     result = pd.read_csv(CSV_PATH)
     if args.no_kalobeyei:
         result = result[result["project"] != "Kalobeyei Settlement"]
-    if args.no_uuid:
-        result = result[~result["project"].apply(is_uuid)]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     fig.suptitle("Average Annual CO₂e Avoided per Mini-Grid (AMS-III.BB)", fontsize=13)
@@ -61,7 +53,7 @@ def main() -> None:
             ax.plot(x_line, m * x_line + b, color="#dc2626", linewidth=1.2,
                     linestyle="--", zorder=2)
             ax.annotate(
-                f"slope = {m * slope_scale:.3g} tCO₂e/{slope_unit}",
+                f"{m * slope_scale:.3g} tCO₂e/{slope_unit}/yr",
                 xy=(0.05, 0.93),
                 xycoords="axes fraction",
                 fontsize=8,
