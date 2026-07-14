@@ -23,7 +23,7 @@ Running log of findings. Updated as exploration progresses.
 | countries | Yes | Exclude — no scientific value |
 | customers | Yes | Include (partial — drop PII and dynamic fields) |
 | exchangerates | Yes | Exclude — better sources available (NREL, IMF, etc.) |
-| meteringbasestations | Yes | Exclude — internal operational data only |
+| meteringbasestations | Yes | Include (partial — drop credential columns via allowlist SELECT) |
 | meteringplatformcustomers | Yes | Exclude — currently empty |
 | meteringplatformtariffs | Yes | Include |
 | minigridprojects | Yes | Include (partial — drop internal/IUO fields) |
@@ -99,7 +99,7 @@ Running log of findings. Updated as exploration progresses.
 ### `meteringbasestations`
 - 58 rows; one base station per metering zone
 - Kalobeyei Settlement has 13+ base stations because the settlement is very large (~500 m range limit per base station)
-- Contains operational credentials (auth tokens, passwords, SIM cards, IPs) — exclude entirely
+- Contains operational credentials (auth tokens, passwords, SIM cards, IPs) — credential columns dropped; table included via allowlist SELECT of safe columns only
 
 ### `tariffs`
 - 870 rows across all sites
@@ -157,7 +157,7 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 1. **Customer pseudonymization**: Replace `customerAccountNumber`, `customerId`, and all customer code fields with SHA-256(account_number + secret_salt). Must be consistent across all tables.
 2. **Phone number removal**: Drop all phone number columns entirely.
 3. **Name/address removal**: Drop all name and street address fields from all tables.
-4. **Credentials**: Drop all credential columns; exclude `companies` and `meteringbasestations` tables entirely.
+4. **Credentials**: Drop all credential columns; exclude `companies` table entirely; include `meteringbasestations` via allowlist SELECT of safe columns only (credential columns never read from DB).
 5. **Payment tables**: Normalize `paymentProcessor` to lowercase. Flag records with 0000-00-00 dates.
 6. **vrmgeneration**: Exclude UBA Acme and Shell Oza 1 rows before release.
 7. **minigridprojects**: Exclude the 3 test sites (lat/long = 0,0).

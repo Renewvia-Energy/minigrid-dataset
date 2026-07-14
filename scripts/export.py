@@ -192,9 +192,15 @@ def export_sparkmeterreadings(engine, out_dir: Path, dry_run: bool) -> int:
     tbl = "sparkmeterreadings"
 
     mbs = pd.read_sql(
-        "SELECT meteringSiteId, meteringBaseStation FROM meteringbasestations", engine
+        "SELECT meteringSiteId, meteringBaseStation, olderMeteringSiteIds FROM meteringbasestations", engine
     )
     site_map = dict(zip(mbs["meteringSiteId"], mbs["meteringBaseStation"]))
+    for _, row in mbs.iterrows():
+        if pd.notna(row["olderMeteringSiteIds"]) and row["olderMeteringSiteIds"].strip():
+            for old_id in row["olderMeteringSiteIds"].split(","):
+                old_id = old_id.strip()
+                if old_id:
+                    site_map[old_id] = row["meteringBaseStation"]
 
     YEAR_RANGE = range(2018, 2026)
     sentinel_dir = out_dir / tbl
@@ -332,6 +338,38 @@ def export_vrmgeneration(engine, out_dir: Path, dry_run: bool) -> int:
     return len(df)
 
 
+# ── meteringbasestations: allowlist columns to exclude credentials ────────────
+
+METERINGBASESTATIONS_SAFE_COLS = [
+    "meteringSiteId", "meteringBaseStation", "projectName",
+    "meteringPlatform", "meteringSiteStatus", "timezoneOffsetUtc",
+    "olderMeteringSiteIds",
+]
+
+def export_meteringbasestations(engine, out_dir: Path, dry_run: bool) -> int:
+    dest = out_dir / "meteringbasestations"
+    path = dest / "data.parquet"
+    if not dry_run and path.exists():
+        rows = pq.read_metadata(path).num_rows
+        print(f"  meteringbasestations: already done ({rows:,} rows) — skipping")
+        return rows
+
+    cols = ", ".join(METERINGBASESTATIONS_SAFE_COLS)
+    print(f"  reading meteringbasestations...", end=" ", flush=True)
+    df = pd.read_sql(f"SELECT {cols} FROM meteringbasestations", engine)
+    print(f"{len(df):,} rows", end=" ", flush=True)
+
+    if dry_run:
+        print("(dry run)")
+        return len(df)
+
+    dest.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, index=False, engine="pyarrow")
+    mb = path.stat().st_size / 1024 / 1024
+    print(f"→ {path.relative_to(out_dir.parent)} ({mb:.1f} MB)")
+    return len(df)
+
+
 # ── minigridprojects: exclude test sites ──────────────────────────────────────
 
 def export_minigridprojects(engine, out_dir: Path, dry_run: bool) -> int:
@@ -386,7 +424,7 @@ def apply_transforms(df: pd.DataFrame, table: str) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description="Export Renewvia DB to anonymized Parquet.")
-    parser.add_argument("--output-dir", default="output", help="Root output directory")
+    parser.add_argument("--output-dir", default="data", help="Root output directory")
     parser.add_argument("--dry-run", action="store_true", help="Skip writing files")
     parser.add_argument("--table", help="Export only this table (for testing)")
     args = parser.parse_args()
@@ -404,7 +442,7 @@ def main():
     )
 
     # Tables handled by special-case exporters
-    special = {"sparkmeterreadings", "vrmgeneration", "minigridprojects"}
+    special = {"sparkmeterreadings", "vrmgeneration", "minigridprojects", "meteringbasestations"}
 
     simple_tables = [t for t in DROP_COLS if t not in special]
 
@@ -415,6 +453,10 @@ def main():
             continue
         print(f"\n[{table}]")
         total_rows += export_simple(engine, table, out_dir, args.dry_run)
+
+    if not args.table or args.table == "meteringbasestations":
+        print("\n[meteringbasestations]")
+        total_rows += export_meteringbasestations(engine, out_dir, args.dry_run)
 
     if not args.table or args.table == "minigridprojects":
         print("\n[minigridprojects]")

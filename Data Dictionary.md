@@ -74,8 +74,19 @@
 
 ---
 
-## Table: meteringbasestations **[EXCLUDE]**
-**Reason**: Internal operational data only; contains credentials (auth tokens, WiFi passwords, SIM cards, IP addresses). The scientifically relevant fields (timezone offset, metering platform, site status) are derivable from `meteringplatformtariffs` and `minigridprojects`.
+## Table: meteringbasestations
+**Purpose**: Maps metering base stations to mini-grid projects. 58 rows. Required join table: `sparkmeterreadings.site` is a UUID that resolves to `meteringSiteId`, and `tariffs.meteringBaseStation` resolves to `meteringBaseStation`. Kalobeyei Settlement has 13+ base stations due to its large geographic extent (~500 m radio range limit per station). Credential columns (auth tokens, WiFi passwords, SIM cards, IP addresses) are excluded from release.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| meteringSiteId | varchar(100) PK | UUID assigned by the metering platform; referenced by `sparkmeterreadings.site` and `sparkmetertransactions.site` |
+| meteringBaseStation | varchar(300) | Human-readable base station name; referenced by `tariffs.meteringBaseStation` and `meteringplatformtariffs.meteringBaseStation` |
+| projectName | varchar(100) FK→minigridprojects | Mini-grid project name |
+| meteringPlatform | varchar(100) | Metering platform vendor (e.g., SparkMeter) |
+| meteringSiteStatus | varchar(100) | Operational status of the site |
+| timezoneOffsetUtc | int | UTC offset in hours (Kenya=3, Nigeria=1) |
+| olderMeteringSiteIds | varchar(500) | Comma-separated list of legacy UUIDs previously assigned to this station; needed to join historical readings |
+| *(credential columns)* | | **[EXCLUDE]** Auth tokens, WiFi passwords, SIM card identifiers, IP addresses — dropped before release |
 
 ---
 
