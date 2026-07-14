@@ -1,12 +1,7 @@
 # Dataset Exploration Notes
+Running log of findings. Updated as exploration progresses.
 
-> Running log of findings. Updated as exploration progresses.
-
----
-
-## 2026-05-13 — Initial exploration
-
-### Database overview
+## Database overview
 
 | Metric | Value |
 |--------|-------|
@@ -20,7 +15,7 @@
 
 ---
 
-### Table inventory
+## Table inventory
 
 | Table | In Dict? | Release decision |
 |-------|----------|-----------------|
@@ -52,9 +47,9 @@
 
 ---
 
-### Key findings per table
+## Key findings per table
 
-#### `sparkmeterreadings` (core dataset)
+### `sparkmeterreadings` (core dataset)
 - 363 million 15-minute heartbeat records from SparkMeter devices
 - Covers multiple metering platforms: `thundercloud`, `koios`, `steamaco`
 - Three `meter_type` values: `customer`, `totalizer`, `pue` (Productive Use Equipment)
@@ -66,7 +61,7 @@
 - `rate` column typed `decimal(60,30)` — stores tariff rate at time of reading
 - PII present: `meter_customer_name`, `meter_customer_phoneNumber`, `meter_address_*`
 
-#### `vrmgeneration`
+### `vrmgeneration`
 - Victron Energy Remote Monitoring (VRM) telemetry data
 - 18 sites covered, Aug 2023 – Dec 2024, ~1-minute resolution
 - Key channels: Battery SOC, Battery current/voltage, Solar Charger PV power/current/voltage, System AC Consumption (L1/L2/L3), Generator state, Inverter (VE.Bus) state
@@ -74,7 +69,7 @@
 - `testingsandbox` has the identical schema but 0 rows
 - Mixed column types: e.g., `PV_Inverter_32_L1_Power` is `varchar(50)` in some device configs — schema-level inconsistency to handle during export
 
-#### `paymentconfirmations` and `paymentvalidations`
+### `paymentconfirmations` and `paymentvalidations`
 - validation = initial M-PESA/Paga webhook receipt; confirmation = after metering platform processes it
 - **Data quality issues**:
   1. `paymentProcessor` inconsistency: "mpesa" vs "M-PESA" — normalize to lowercase
@@ -83,7 +78,7 @@
 - Date range: 2018–2026; Nigeria (Paga) starting ~2020
 - `isReversed` column exists in `paymentconfirmations` but not `paymentvalidations`
 
-#### `customers`
+### `customers`
 - 12,820 customer records
 - Demographics: mostly residential (~76%), active (~84%), male (~54%), female (~31%), NULL gender (~15%)
 - Rich `customerType` taxonomy: Residential, Shop, Bar/Restaurant, Church, School, Health Clinic, Kinyozi/Salon, Workshop, NGO, Video Hall, Battery Charging, Guest House, Conference Hall, Mosque, etc.
@@ -91,7 +86,7 @@
 - `formFiller` is a staff member's name — PII; exclude
 - Columns not in original dictionary: `customerId`, `meterOnPlatform`, `dcuId`, `signupPaymentProcessed`, `latestReading`, `status`
 
-#### `minigridprojects`
+### `minigridprojects`
 - 26 projects: 15 Kenya + 11 Nigeria (including 3 test placeholders with lat/long = 0,0)
 - All real projects are PV Solar generation
 - Capacity range: ~6 kWp (Olkiramatian) to ~541 kWp (Kalobeyei Settlement)
@@ -101,31 +96,31 @@
 - PVWatts fields (`pvwatts*`) are derived from NREL's PVWatts tool — exclude (source data available from NREL)
 - `investors`, `donors`, `remoteMonitoring*` — no scientific value or IUO; exclude
 
-#### `meteringbasestations`
+### `meteringbasestations`
 - 58 rows; one base station per metering zone
 - Kalobeyei Settlement has 13+ base stations because the settlement is very large (~500 m range limit per base station)
 - Contains operational credentials (auth tokens, passwords, SIM cards, IPs) — exclude entirely
 
-#### `tariffs`
+### `tariffs`
 - 870 rows across all sites
 - Many rows have `baseRate = 0`, `totalRate = 0` — historical placeholder rows from system setup
 - `startingDatetime` tracks when each rate took effect (allows reconstructing historical effective rate for any reading)
 
-#### `sparkmetercustomers`
+### `sparkmetercustomers`
 - Private address/location fields: `meters_address`, `meters_city`, `meters_coords`, `meters_country`, `meters_street1`, `meters_street2`, `meters_tags` — exclude
 - `name`, `phoneNumber` — PII; exclude
 
-#### `sparkmetertransactions`
+### `sparkmetertransactions`
 - `referenceId`, `externalId`, `memo` — internal use only; exclude
 - `to_name`, `from_name` could contain customer display names — exclude
 
-#### `exchangerates`
+### `exchangerates`
 - Daily USD exchange rates for KES and NGN, 2018–2026
 - Better and more authoritative sources exist online (World Bank, IMF, NREL) — exclude from release
 
 ---
 
-### Data quality issues summary
+## Data quality issues summary
 
 | Issue | Table(s) | Severity | Notes |
 |-------|----------|----------|-------|
@@ -140,7 +135,7 @@
 
 ---
 
-### PII inventory (for anonymization)
+## PII inventory (for anonymization)
 
 | Table | PII columns |
 |-------|-------------|
@@ -157,7 +152,7 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 
 ---
 
-### Anonymization strategy (draft)
+## Anonymization strategy (draft)
 
 1. **Customer pseudonymization**: Replace `customerAccountNumber`, `customerId`, and all customer code fields with SHA-256(account_number + secret_salt). Must be consistent across all tables.
 2. **Phone number removal**: Drop all phone number columns entirely.
@@ -169,7 +164,7 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 
 ---
 
-### Visualization ideas for Scientific Data paper
+## Visualization ideas for Scientific Data paper
 
 1. **ARPU and ACPU** over time for different customer types and geographies
 2. **Load profiles** of archetypical customers, average 24-hour profile
@@ -183,7 +178,7 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 
 ---
 
-### Answers to follow-up questions (2026-05-14)
+## Answers to follow-up questions
 
 **`sparkmeterreadings` date range**: 2018-04-19 to 2025-12-16. There are 183,330 records with `heartbeatStart = 1970-01-01 00:00:00` (Unix epoch zero — corrupted timestamps, ~0.05% of total). All other timestamps are valid. These epoch-zero rows should be filtered out of the release.
 
@@ -200,3 +195,14 @@ Identifiers to pseudonymize (consistent token across tables): `customerAccountNu
 **`isReversed` in `paymentconfirmations`**: Only 3 records ever have `isReversed=1`. The field was added retroactively; ~1M records have NULL. Reversals are negligible and the field provides almost no scientific value.
 
 **`meters_coords` in `sparkmetercustomers`**: NOT GPS coordinates — values are wiring color codes ("RED", "YELLOW"). Already excluded. (lat/lon string?)
+
+## Lit review
+https://www.researchgate.net/publication/346332520_Classification_and_modeling_of_load_profiles_of_isolated_mini-grids_in_developing_countries_A_data-driven_approach
+https://www.researchgate.net/publication/303564531_Assessment_of_Load_Profiles_in_Minigrids_A_Case_in_Tanzania
+https://www.sciencedirect.com/science/article/pii/S0301421523005542
+https://pubs.naruc.org/pub.cfm?id=A1E7A0F1-155D-0A36-319F-8CBC8BE8B342
+https://scispace.com/pdf/the-impact-of-an-electrical-mini-grid-on-the-development-of-5e2j24qpix.pdf
+One of our previous publications: https://iopscience.iop.org/article/10.1088/2634-4505/ad4ffb
+https://www.researchgate.net/publication/400672774_Overcoming_Technical_and_Operational_Barriers_in_Low-Voltage_Mini-Grids_Two_Decades_of_Research_Trends_Progress_and_Pathways_for_Accelerated_Rural_Electrification_2005-2025
+https://www.mdpi.com/1996-1073/19/6/1441
+https://www.frontiersin.org/journals/energy-research/articles/10.3389/fenrg.2022.1089025/full
