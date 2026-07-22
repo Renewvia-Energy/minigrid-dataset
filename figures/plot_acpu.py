@@ -2,7 +2,7 @@
 """
 Average Consumption Per User (ACPU) analysis for Renewvia mini-grid customers.
 
-Reads data/acpu_monthly.csv (produced by prep_acpu.py) and saves four figures
+Reads paper/graphics/acpu_monthly.csv (produced by prep_acpu.py) and saves four figures
 to paper/graphics/:
   acpu_histograms.png       — ACPU distribution by customer type and country
   acpu_by_site.png          — ACPU box plots by site
@@ -32,7 +32,7 @@ COUNTRIES = ["Kenya", "Nigeria"]
 
 # ── 1. Load monthly aggregates ────────────────────────────────────────────────
 
-CSV = Path("data/acpu_monthly.csv")
+CSV = Path("paper/graphics/acpu_monthly.csv")
 if not CSV.exists():
     raise FileNotFoundError(f"{CSV} not found — run figures/prep_acpu.py first.")
 

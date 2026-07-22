@@ -21,10 +21,15 @@ Usage:
   python figures/carbon_accounting.py
 """
 
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
+
+READ_COLUMNS = ["meter_customer_code", "meter_type", "slot_start", "energy_kwh", "tariff"]
+BATCH_SIZE = 2_000_000
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -65,21 +70,56 @@ def is_uuid(stem: str) -> bool:
     return len(stem) == 36 and stem.count("-") == 4
 
 
+def annualize_file(f: Path) -> pd.DataFrame:
+    """
+    Stream a single site's parquet file in row-group batches and reduce
+    straight to (customer, year, is_residential) -> annual_kwh. Full site
+    files hold 100M+ rows; loading them whole (or concatenating many sites
+    before aggregating) exhausts memory on this machine.
+    """
+    acc: dict[tuple[str, int, bool], float] = defaultdict(float)
+    n_rows = 0
+    pf = pq.ParquetFile(f)
+    for batch in pf.iter_batches(batch_size=BATCH_SIZE, columns=READ_COLUMNS):
+        bdf = batch.to_pandas()
+        bdf = bdf[bdf["meter_type"] == "customer"]
+        if bdf.empty:
+            continue
+        year = bdf["slot_start"].dt.year
+        is_residential = bdf["tariff"].str.contains("Residential", case=False, na=False)
+        grouped = (
+            bdf.assign(year=year, is_residential=is_residential)
+            .groupby(["meter_customer_code", "year", "is_residential"])["energy_kwh"]
+            .sum()
+        )
+        for key, value in grouped.items():
+            acc[key] += value
+        n_rows += len(bdf)
+
+    rows = [(cust, yr, res, kwh) for (cust, yr, res), kwh in acc.items()]
+    annual = pd.DataFrame(rows, columns=["meter_customer_code", "year", "is_residential", "annual_kwh"])
+    return annual, n_rows
+
+
 def load_all_sites() -> pd.DataFrame:
     frames = []
     for f in sorted(CLEAN_DIR.glob("*.parquet")):
         if is_uuid(f.stem):
             continue
         project = stem_to_project(f.stem)
-        df = pd.read_parquet(
-            f,
-            columns=["meter_customer_code", "meter_type", "slot_start", "energy_kwh", "tariff"],
-        )
-        df = df[df["meter_type"] == "customer"].copy()
-        df["project"] = project
-        frames.append(df)
-        print(f"  Loaded {f.stem} → '{project}' ({len(df):,} rows)")
-    return pd.concat(frames, ignore_index=True)
+        annual, n_rows = annualize_file(f)
+        annual["project"] = project
+        frames.append(annual)
+        print(f"  Loaded {f.stem} → '{project}' ({n_rows:,} rows)")
+
+    annual = pd.concat(frames, ignore_index=True)
+    # Kalobeyei sub-sites roll up to one project; re-sum in case a customer
+    # code recurs across sub-site files under the same rolled-up project.
+    annual = (
+        annual.groupby(["project", "meter_customer_code", "year", "is_residential"], as_index=False)
+        ["annual_kwh"].sum()
+    )
+    return annual
 
 
 # ---------------------------------------------------------------------------
@@ -108,17 +148,7 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("Loading clean readings...")
-    df = load_all_sites()
-
-    df["year"] = df["slot_start"].dt.year
-    df["is_residential"] = df["tariff"].str.contains("Residential", case=False, na=False)
-
-    # Annual kWh per customer per project per year
-    annual = (
-        df.groupby(["project", "meter_customer_code", "year", "is_residential"])["energy_kwh"]
-        .sum()
-        .reset_index(name="annual_kwh")
-    )
+    annual = load_all_sites()
 
     annual["co2e_tonne"] = compute_co2e(annual["annual_kwh"], annual["is_residential"])
 
@@ -145,7 +175,7 @@ def main() -> None:
     avg_co2e = avg_co2e.merge(n_full_years.rename("n_years"), on="project")
 
     # Customer count per project (all-time unique customers)
-    cust_count = df.groupby("project")["meter_customer_code"].nunique().reset_index(name="customer_count")
+    cust_count = annual.groupby("project")["meter_customer_code"].nunique().reset_index(name="customer_count")
 
     # Project metadata
     proj_meta = pd.read_parquet(

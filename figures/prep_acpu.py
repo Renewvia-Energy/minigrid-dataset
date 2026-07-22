@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Aggregate sparkmeterreadings_clean parquet files into monthly per-customer
-energy totals and save to data/acpu_monthly.csv.
+energy totals and save to paper/graphics/acpu_monthly.csv.
 
 Run this once before plot_acpu.py. Processing ~650M 15-min rows file-by-file
 keeps peak memory manageable by aggregating before concatenating.
@@ -12,12 +12,17 @@ Usage:
 
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
-OUT_CSV = Path("data/acpu_monthly.csv")
+OUT_CSV = Path("paper/graphics/acpu_monthly.csv")
+
+READ_COLUMNS = ["meter_customer_code", "meter_type", "slot_start", "energy_kwh", "tariff"]
+BATCH_SIZE = 2_000_000
 
 FILENAME_MAP: dict[str, tuple[str, str]] = {
     "Akipelai":                            ("Akipelai",              "Nigeria"),
@@ -49,6 +54,37 @@ FILENAME_MAP: dict[str, tuple[str, str]] = {
     "Ringiti":                             ("Ringiti",               "Kenya"),
 }
 
+def aggregate_file(fpath):
+    """
+    Stream a site's parquet file in row-group batches and reduce straight
+    to (customer, cust_class, ym) -> monthly_kwh. Full site files hold
+    100M+ rows; loading them whole via pd.read_parquet (as string columns
+    meter_customer_code/meter_type/tariff) exhausts memory on this machine.
+    """
+    acc: dict[tuple[str, str, str], float] = defaultdict(float)
+    n_rows = 0
+    pf = pq.ParquetFile(fpath)
+    for batch in pf.iter_batches(batch_size=BATCH_SIZE, columns=READ_COLUMNS):
+        bdf = batch.to_pandas()
+        bdf = bdf[bdf["meter_type"] == "customer"]
+        if bdf.empty:
+            continue
+        cust_class = np.where(bdf["tariff"].str.strip().str.lower() == "residential", "Residential", "Commercial")
+        ym = bdf["slot_start"].dt.to_period("M").dt.strftime("%Y-%m")
+        grouped = (
+            bdf.assign(cust_class=cust_class, ym=ym)
+            .groupby(["meter_customer_code", "cust_class", "ym"])["energy_kwh"]
+            .sum()
+        )
+        for key, value in grouped.items():
+            acc[key] += value
+        n_rows += len(bdf)
+
+    rows = [(cust, cls, ym, kwh) for (cust, cls, ym), kwh in acc.items()]
+    agg = pd.DataFrame(rows, columns=["meter_customer_code", "cust_class", "ym", "monthly_kwh"])
+    return agg, n_rows
+
+
 data_dir = Path("data/sparkmeterreadings_clean")
 all_files = sorted(data_dir.glob("*.parquet"))
 named_files = [f for f in all_files if not re.match(r"[0-9a-f]{8}-", f.stem)]
@@ -63,28 +99,11 @@ for fpath in named_files:
         continue
     project_name, country = FILENAME_MAP[stem]
 
-    df = pd.read_parquet(
-        fpath,
-        columns=["meter_customer_code", "meter_type", "slot_start", "energy_kwh", "tariff"],
-    )
-    df = df[df["meter_type"] == "customer"]
-    df["cust_class"] = np.where(
-        df["tariff"].str.strip().str.lower() == "residential",
-        "Residential",
-        "Commercial",
-    )
-    df["ym"] = df["slot_start"].dt.to_period("M").dt.strftime("%Y-%m")
-
-    agg = (
-        df.groupby(["meter_customer_code", "cust_class", "ym"], observed=True)["energy_kwh"]
-        .sum()
-        .reset_index()
-        .rename(columns={"energy_kwh": "monthly_kwh"})
-    )
+    agg, n_rows = aggregate_file(fpath)
     agg["projectName"] = project_name
     agg["country"]     = country
     monthly_chunks.append(agg)
-    print(f"  {fpath.name}: {len(df):,} rows → {len(agg):,} user-months")
+    print(f"  {fpath.name}: {n_rows:,} rows → {len(agg):,} user-months")
 
 monthly = pd.concat(monthly_chunks, ignore_index=True)
 print(f"\n  Total user-months: {len(monthly):,}")

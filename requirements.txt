@@ -1,0 +1,11 @@
+numpy
+pandas
+pyarrow
+matplotlib
+scipy
+statsmodels
+requests
+tqdm
+sqlalchemy
+pymysql
+python-dotenv
