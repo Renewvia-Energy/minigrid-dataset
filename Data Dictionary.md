@@ -1,6 +1,6 @@
 # MySQL Database Data Dictionary — Renewvia Mini-Grid Management System
 
-> Tables are listed alphabetically. **[VIEW]** = database view with no independent data. Within included tables, columns marked **[EXCLUDE]** are dropped from the release. Columns marked **[PSEUDONYMIZE]** are replaced with a consistent opaque token.
+> Tables are listed alphabetically. Within tables, columns marked **[EXCLUDE]** are dropped from the release. Columns marked **[PSEUDONYMIZE]** are replaced with a consistent opaque token.
 
 ---
 
@@ -39,14 +39,6 @@
 | signupPaymentProcessed | tinyint | 1 if the initial signup payment has been processed |
 | latestReading | datetime | **[EXCLUDE]** Dynamic snapshot |
 | status | varchar(100) | **[EXCLUDE]** Dynamic snapshot |
-
----
-
-
-## Table: gmgCustomers **[VIEW]**
-## Table: gmgMeterReadings **[VIEW]**
-## Table: gmgMiniGridProjects **[VIEW]**
-## Table: gmgTariffs **[VIEW]**
 
 ---
 
@@ -412,13 +404,6 @@
 | processedTimestamp | datetime | Timestamp when transaction was processed |
 | reversedTimestamp | datetime | Timestamp when transaction was reversed (NULL if not reversed) |
 | erroredTimestamp | datetime | Timestamp when transaction errored (NULL if no error) |
-
----
-
-## Table: synota **[VIEW]**
-## Table: uniMeteringPlatformCustomers **[VIEW]**
-## Table: uniMiniGridProjects **[VIEW]**
-## Table: uniSparkMeterReadings **[VIEW]**
 
 ---
 
