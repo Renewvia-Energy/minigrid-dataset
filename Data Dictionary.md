@@ -1,16 +1,6 @@
 # MySQL Database Data Dictionary — Renewvia Mini-Grid Management System
 
-> Tables are listed alphabetically. **[EXCLUDE]** = not included in public release. **[VIEW]** = database view with no independent data. Within included tables, columns marked **[EXCLUDE]** are dropped from the release. Columns marked **[PSEUDONYMIZE]** are replaced with a consistent opaque token.
-
----
-
-## Table: companies **[EXCLUDE]**
-**Reason**: Contains API credentials.
-
----
-
-## Table: countries **[EXCLUDE]**
-**Reason**: No scientific value; coverage (Kenya, Nigeria) is documented in `minigridprojects`.
+> Tables are listed alphabetically. **[VIEW]** = database view with no independent data. Within included tables, columns marked **[EXCLUDE]** are dropped from the release. Columns marked **[PSEUDONYMIZE]** are replaced with a consistent opaque token.
 
 ---
 
@@ -52,20 +42,6 @@
 
 ---
 
-## Table: encryptedPhoneNumbers **[EXCLUDE]**
-**Reason**: Internal anonymization lookup table mapping raw phone numbers to HMAC-SHA256 hashes.
-
----
-
-## Table: errorlogs **[EXCLUDE]**
-**Reason**: Internal application error log.
-
----
-
-## Table: exchangerates **[EXCLUDE]**
-**Reason**: Better and more authoritative sources are available online (World Bank, IMF). Daily USD/KES and USD/NGN rates 2018–present.
-
----
 
 ## Table: gmgCustomers **[VIEW]**
 ## Table: gmgMeterReadings **[VIEW]**
@@ -87,11 +63,6 @@
 | timezoneOffsetUtc | int | UTC offset in hours (Kenya=3, Nigeria=1) |
 | olderMeteringSiteIds | varchar(500) | Comma-separated list of legacy UUIDs previously assigned to this station; needed to join historical readings |
 | *(credential columns)* | | **[EXCLUDE]** Auth tokens, WiFi passwords, SIM card identifiers, IP addresses — dropped before release |
-
----
-
-## Table: meteringplatformcustomers **[EXCLUDE]**
-**Reason**: Currently empty (0 rows).
 
 ---
 
@@ -152,11 +123,6 @@
 
 ---
 
-## Table: newsteamacocustomers **[EXCLUDE]**
-**Reason**: Internal SteamaCo platform migration table.
-
----
-
 ## Table: paymentconfirmations
 **Purpose**: Payment confirmations after the metering platform has processed a payment. ~1.03 million rows. Complements `paymentvalidations`.
 
@@ -202,11 +168,6 @@
 
 ---
 
-## Table: paymentreceiptsqueue **[EXCLUDE]**
-**Reason**: Empty (0 rows).
-
----
-
 ## Table: paymentvalidations
 **Purpose**: Initial payment validation records from the payment processor webhook, before metering platform processing. ~1.51 million rows. Same schema as `paymentconfirmations` except no `isReversed` or `meteringTransactionID` columns.
 
@@ -244,21 +205,6 @@
 | isSignup | tinyint | 1 if this is a signup payment |
 | isBalanceTransfer | tinyint | 1 if this is a balance transfer |
 | isAutomatic | tinyint | 1 if this payment was initiated automatically |
-
----
-
-## Table: poles **[EXCLUDE]**
-**Reason**: Internal use only.
-
----
-
-## Table: poles_v2 **[EXCLUDE]**
-**Reason**: Internal use only.
-
----
-
-## Table: smsSurveys **[EXCLUDE]**
-**Reason**: Internal use only.
 
 ---
 
