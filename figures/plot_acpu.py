@@ -188,12 +188,12 @@ fig.suptitle(
 for ax, country in zip(axes, COUNTRIES):
     sub = monthly2[monthly2["country"] == country].copy()
 
-    y_cap = sub["monthly_wh"].quantile(0.99)
-    sub_plot = sub[sub["monthly_wh"] <= y_cap]
+    y_cap = sub["monthly_kwh"].quantile(0.99)
+    sub_plot = sub[sub["monthly_kwh"] <= y_cap]
 
     ax.scatter(
         sub_plot["months_since_first"],
-        sub_plot["monthly_wh"],
+        sub_plot["monthly_kwh"],
         alpha=0.04,
         s=3,
         color="#2563eb",
@@ -201,7 +201,7 @@ for ax, country in zip(axes, COUNTRIES):
     )
 
     by_tenure = (
-        sub.groupby("months_since_first")["monthly_wh"]
+        sub.groupby("months_since_first")["monthly_kwh"]
         .agg(mean="mean", count="count")
         .query("count >= 10")
         .reset_index()
@@ -219,7 +219,7 @@ for ax, country in zip(axes, COUNTRIES):
     ax.set_xlim(left=-0.5, right=x_max + 0.5)
     ax.set_ylim(bottom=0, top=y_cap * 1.05)
     ax.set_xlabel("Months since first reading", fontsize=10)
-    ax.set_ylabel("Monthly consumption (Wh)", fontsize=10)
+    ax.set_ylabel("Monthly consumption (kWh)", fontsize=10)
     ax.set_title(country, fontsize=11)
     ax.grid(axis="both", linewidth=0.4, alpha=0.4)
 
@@ -227,7 +227,7 @@ for ax, country in zip(axes, COUNTRIES):
     n_obs  = len(sub)
     ax.text(0.02, 0.97,
             f"{n_cust:,} customers · {n_obs:,} user-months\n"
-            f"(y capped at 99th pct: {y_cap:,.0f} Wh)",
+            f"(y capped at 99th pct: {y_cap:,.2f} kWh)",
             transform=ax.transAxes, va="top", fontsize=8, color="gray")
     ax.legend(fontsize=9, loc="upper right")
 
@@ -242,11 +242,11 @@ plt.close(fig)
 MIN_ACTIVE_MONTHS = 3
 
 slopes_df = (
-    monthly2[["meter_customer_code", "country", "months_since_first", "monthly_wh"]]
+    monthly2[["meter_customer_code", "country", "months_since_first", "monthly_kwh"]]
     .groupby(["meter_customer_code", "country"], observed=True)
     .apply(
         lambda g: (
-            stats.linregress(g["months_since_first"], g["monthly_wh"]).slope
+            stats.linregress(g["months_since_first"], g["monthly_kwh"]).slope
             if len(g) >= MIN_ACTIVE_MONTHS else np.nan
         ),
         include_groups=False,
@@ -272,20 +272,20 @@ for ax, country in zip(axes, COUNTRIES):
     ax.hist(slopes.clip(lo, hi), bins=60, color="#2563eb", alpha=0.7, edgecolor="none")
     ax.axvline(0, color="black", linewidth=1.2, linestyle="--", label="zero (H₀)")
     ax.axvline(slopes.mean(), color="#dc2626", linewidth=1.5,
-               label=f"mean slope: {slopes.mean():.2f}")
+               label=f"mean slope: {slopes.mean():.4f}")
 
     p_str = f"{p_val:.2e}" if p_val < 0.001 else f"{p_val:.4f}"
     ax.text(
         0.97, 0.97,
         f"n = {len(slopes):,}\n"
-        f"mean = {slopes.mean():.2f} Wh/mo²\n"
+        f"mean = {slopes.mean():.4f} kWh/mo²\n"
         f"t = {t_stat:.2f}\n"
         f"p = {p_str}",
         transform=ax.transAxes, va="top", ha="right", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="#9ca3af", alpha=0.9),
     )
 
-    ax.set_xlabel("Slope (Wh/month per month of tenure)", fontsize=10)
+    ax.set_xlabel("Slope (kWh/month per month of tenure)", fontsize=10)
     ax.set_ylabel("Number of customers", fontsize=10)
     ax.set_title(country, fontsize=11)
     ax.legend(fontsize=9)

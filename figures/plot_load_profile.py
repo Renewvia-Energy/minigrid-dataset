@@ -456,7 +456,7 @@ for hourly, use_median in [(False, False), (True, False), (False, True), (True, 
         "band_label": band_label,
         "time_unit": time_unit,
         "subtitle": ", ".join(subtitle_parts),
-        "outfile": OUT_DIR / f"{site_slug}_{tariff_slug}_load_profile{observed_suffix}{hourly_suffix}{spread_suffix}.png",
+        "outfile": OUT_DIR / f"load_profile_{tariff_slug}_{centre_label.lower()}_{site_slug}{hourly_suffix}{observed_suffix}.png",
     })
 
 # ---------------------------------------------------------------------------
@@ -480,7 +480,7 @@ for s in all_stats:
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     ax.xaxis.set_minor_locator(mdates.HourLocator())
     ax.set_xlim(s["times"][0], s["times"][-1])
-    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
+    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.grid(axis="y", linewidth=0.5, alpha=0.5)
     ax.grid(axis="x", linewidth=0.3, alpha=0.3, which="minor")
 

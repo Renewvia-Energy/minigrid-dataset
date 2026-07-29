@@ -2,3 +2,4 @@
 data/
 .claude/
 figures/__pycache__
+paper/graphics

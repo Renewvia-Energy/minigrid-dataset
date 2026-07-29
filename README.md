@@ -11,7 +11,7 @@ Before you get started, I strongly recommend you read the [Data Dictionary](./Da
 
 You can safely ignore `explore/`, `scripts/`, `.env.example`, and `notes.md`. Those are for internal use to help Renewvia staff download the tables from our MySQL database into the parquet files contained in `data/`.
 
-Scripts to generate visualizations should be kept in the `figures/` folder. Use the scripts in that folder to understand how to access and use the dataset.
+Scripts to generate visualizations should be kept in the `figures/` folder. Use the scripts in that folder to understand how to access and use the dataset. To run them, you'll first need to run `pip install -r requirements.txt`.
 
 ## Directory map
 
@@ -32,7 +32,14 @@ minigrid-dataset/
 │   ├── tariffs/data.parquet
 │   └── vrmgeneration/data.parquet
 ├── figures/                            # Visualization scripts
-│   └── plot_load_profile.py
+│   ├── plot_load_profile.py            # Average daily load profiles by customer tier
+│   ├── plot_arpu.py                    # Average revenue per user over time
+│   ├── plot_acpu.py                    # Average cost per unit by site
+│   ├── prep_acpu.py                    # Data prep for ACPU analysis
+│   ├── plot_carbon_accounting.py       # Carbon offset estimates by site
+│   ├── carbon_accounting.py            # Carbon accounting calculations
+│   ├── plot_power_quality.py           # Voltage/frequency power quality metrics
+│   └── power_quality.py               # Power quality data prep
 ├── scripts/                            # Data pipeline
 │   ├── export.py                       # DB → Parquet (requires database access)
 │   └── clean_readings.py              # Raw readings → clean 15-min time series
@@ -40,5 +47,6 @@ minigrid-dataset/
 ├── explore/                            # Ad-hoc SQL analysis queries
 │   └── *.sql
 ├── Data Dictionary.md                  # Column-level documentation for all tables
+├── requirements.txt                    # Python dependencies for figures/ and scripts/
 └── README.md
 ```
