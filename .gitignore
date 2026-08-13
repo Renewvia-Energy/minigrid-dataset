@@ -1,5 +1,6 @@
 .env
 data/
+data_bkup/
 .claude/
 figures/__pycache__
 paper/graphics
