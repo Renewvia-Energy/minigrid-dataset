@@ -32,7 +32,7 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 OUT_DIR  = Path("paper/graphics")
-DATA_DIR = Path("data/sparkmeterreadings")
+DATA_DIR = Path("data")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 COLS = ["voltageMin", "voltageMax", "voltageAvg", "powerFactorAvg", "meter_type"]
@@ -49,31 +49,33 @@ hist_vmax = np.zeros(V_BINS,            dtype=np.int64)
 hist_2d   = np.zeros((V_BINS, PF_BINS), dtype=np.int64)
 
 print("Loading sparkmeterreadings …")
-site_dirs = sorted(d for d in DATA_DIR.iterdir() if d.is_dir())
-for site_dir in tqdm(site_dirs, desc="sites", unit="site"):
-    for parquet_path in sorted(site_dir.glob("*.parquet")):
-        chunk = pq.read_table(parquet_path, columns=COLS).to_pandas()
-        chunk = chunk[chunk["meter_type"] == "customer"]
+site_files = sorted(
+    f for f in DATA_DIR.glob("sparkmeterreadings_*.parquet")
+    if not f.stem.startswith("sparkmeterreadings_clean_")
+)
+for parquet_path in tqdm(site_files, desc="sites", unit="site"):
+    chunk = pq.read_table(parquet_path, columns=COLS).to_pandas()
+    chunk = chunk[chunk["meter_type"] == "customer"]
 
-        v_mask = (
-            (chunk["voltageMin"] >  V_LO) & (chunk["voltageMin"] <= V_HI)
-            & (chunk["voltageAvg"] >  V_LO) & (chunk["voltageAvg"] <= V_HI)
-            & (chunk["voltageMax"] >  V_LO) & (chunk["voltageMax"] <= V_HI)
-        )
-        pf_mask = (chunk["powerFactorAvg"] > PF_LO) & (chunk["powerFactorAvg"] <= PF_HI)
+    v_mask = (
+        (chunk["voltageMin"] >  V_LO) & (chunk["voltageMin"] <= V_HI)
+        & (chunk["voltageAvg"] >  V_LO) & (chunk["voltageAvg"] <= V_HI)
+        & (chunk["voltageMax"] >  V_LO) & (chunk["voltageMax"] <= V_HI)
+    )
+    pf_mask = (chunk["powerFactorAvg"] > PF_LO) & (chunk["powerFactorAvg"] <= PF_HI)
 
-        valid_v  = chunk.loc[v_mask]
-        valid_pq = chunk.loc[v_mask & pf_mask]
+    valid_v  = chunk.loc[v_mask]
+    valid_pq = chunk.loc[v_mask & pf_mask]
 
-        hist_vmin += np.histogram(valid_v["voltageMin"], bins=v_edges)[0].astype(np.int64)
-        hist_vavg += np.histogram(valid_v["voltageAvg"], bins=v_edges)[0].astype(np.int64)
-        hist_vmax += np.histogram(valid_v["voltageMax"], bins=v_edges)[0].astype(np.int64)
+    hist_vmin += np.histogram(valid_v["voltageMin"], bins=v_edges)[0].astype(np.int64)
+    hist_vavg += np.histogram(valid_v["voltageAvg"], bins=v_edges)[0].astype(np.int64)
+    hist_vmax += np.histogram(valid_v["voltageMax"], bins=v_edges)[0].astype(np.int64)
 
-        h2d, _, _ = np.histogram2d(
-            valid_pq["voltageAvg"], valid_pq["powerFactorAvg"],
-            bins=[v_edges, pf_edges],
-        )
-        hist_2d += h2d.astype(np.int64)
+    h2d, _, _ = np.histogram2d(
+        valid_pq["voltageAvg"], valid_pq["powerFactorAvg"],
+        bins=[v_edges, pf_edges],
+    )
+    hist_2d += h2d.astype(np.int64)
 
 # ── Histogram CSV ─────────────────────────────────────────────────────────────
 

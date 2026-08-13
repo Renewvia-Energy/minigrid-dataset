@@ -17,9 +17,9 @@ Usage:
   python figures/plot_load_profile.py --all <tariff> [options]
 
 Examples:
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet Residential
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Akipelai.parquet Residential --utc-offset 3
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean/Ndeda.parquet data/sparkmeterreadings_clean/Akipelai.parquet Residential
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Ndeda.parquet Residential
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Akipelai.parquet Residential --utc-offset 3
+  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Ndeda.parquet data/sparkmeterreadings_clean_Akipelai.parquet Residential
   python figures/plot_load_profile.py --all Residential
 
 Optional arguments:
@@ -226,7 +226,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "parquet_files",
     nargs="+",
-    help="Path(s) to site parquet(s) in data/sparkmeterreadings_clean/. Last positional argument is the tariff. With --all, the only positional argument is the tariff.",
+    help="Path(s) to sparkmeterreadings_clean_*.parquet files in data/. Last positional argument is the tariff. With --all, the only positional argument is the tariff.",
 )
 parser.add_argument(
     "--all", action="store_true", dest="use_all",
@@ -248,12 +248,12 @@ if args.use_all:
         print("Error: with --all, provide only the tariff as a positional argument.", file=sys.stderr)
         sys.exit(1)
     tariff = args.parquet_files[0]
-    clean_dir = Path("data/sparkmeterreadings_clean")
-    file_paths = sorted(clean_dir.glob("*.parquet"))
+    data_dir = Path("data")
+    file_paths = sorted(data_dir.glob("sparkmeterreadings_clean_*.parquet"))
     if not file_paths:
-        print(f"Error: no parquet files found in {clean_dir}", file=sys.stderr)
+        print(f"Error: no sparkmeterreadings_clean_*.parquet files found in {data_dir}", file=sys.stderr)
         sys.exit(1)
-    print(f"Using all {len(file_paths)} parquet files in {clean_dir}")
+    print(f"Using all {len(file_paths)} clean site parquet files in {data_dir}")
 else:
     tariff = args.parquet_files[-1]
     file_paths = [Path(p) for p in args.parquet_files[:-1]]
@@ -266,13 +266,13 @@ else:
 # ---------------------------------------------------------------------------
 utc_by_station = None
 if args.utc_offset is None:
-    data_root = file_paths[0].parent.parent
+    data_root = file_paths[0].parent
     stations = pd.read_parquet(
-        data_root / "meteringbasestations" / "data.parquet",
+        data_root / "meteringbasestations.parquet",
         columns=["meteringBaseStation", "projectName"],
     )
     proj = pd.read_parquet(
-        data_root / "minigridprojects" / "data.parquet",
+        data_root / "minigridprojects.parquet",
         columns=["projectName", "timezoneOffsetUtc"],
     )
     utc_by_station = (
@@ -299,8 +299,8 @@ n_meters_total = 0
 n_obs_total = 0
 
 for clean_path in file_paths:
-    site_name = clean_path.stem
-    data_root = clean_path.parent.parent
+    site_name = clean_path.stem.removeprefix("sparkmeterreadings_clean_")
+    data_root = clean_path.parent
 
     # Resolve UTC offset for this site
     if args.utc_offset is not None:
@@ -320,11 +320,11 @@ for clean_path in file_paths:
     print(f"Site: {site_name}  |  UTC offset: {utc_offset:+d}h")
 
     # Find matching customer codes from raw data
-    raw_dir = data_root / "sparkmeterreadings" / site_name
-    raw_files = sorted(raw_dir.glob("*.parquet"))
-    if not raw_files:
-        print(f"Error: no raw parquet files found in {raw_dir}", file=sys.stderr)
+    raw_path = data_root / f"sparkmeterreadings_{site_name}.parquet"
+    if not raw_path.exists():
+        print(f"Error: raw parquet file not found: {raw_path}", file=sys.stderr)
         sys.exit(1)
+    raw_files = [raw_path]
 
     most_common_tariff = most_common_tariff_by_customer(raw_files)
     matching_codes = most_common_tariff[

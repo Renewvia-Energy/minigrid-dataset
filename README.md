@@ -18,19 +18,18 @@ Scripts to generate visualizations should be kept in the `figures/` folder. Use 
 ```
 minigrid-dataset/
 ├── data/   # Published dataset. This is gitignored, so you'll need to download the dataset from Renewvia's SPO link after signing the DTUA.
-│   ├── customers/data.parquet
-│   ├── meteringplatformtariffs/data.parquet
-│   ├── minigridprojects/data.parquet
-│   ├── paymentconfirmations/data.parquet
-│   ├── paymentvalidations/data.parquet
-│   ├── sparkmetercustomers/data.parquet
-│   ├── sparkmeterreadings/             # Partitioned by site and year
-│   │   └── <site>/<year>.parquet
-│   ├── sparkmeterreadings_clean/       # Cleaned 15-min energy time series
-│   │   └── <site>.parquet
-│   ├── sparkmetertransactions/data.parquet
-│   ├── tariffs/data.parquet
-│   └── vrmgeneration/data.parquet
+│   ├── customers.parquet
+│   ├── meteringbasestations.parquet
+│   ├── meteringplatformtariffs.parquet
+│   ├── minigridprojects.parquet
+│   ├── paymentconfirmations.parquet
+│   ├── paymentvalidations.parquet
+│   ├── sparkmetercustomers.parquet
+│   ├── sparkmeterreadings_<site>.parquet        # One file per site, all years merged
+│   ├── sparkmeterreadings_clean_<site>.parquet  # Cleaned 15-min energy time series
+│   ├── sparkmetertransactions.parquet
+│   ├── tariffs.parquet
+│   └── vrmgeneration.parquet
 ├── figures/                            # Visualization scripts
 │   ├── plot_load_profile.py            # Average daily load profiles by customer tier
 │   ├── plot_arpu.py                    # Average revenue per user over time
@@ -42,8 +41,9 @@ minigrid-dataset/
 │   └── power_quality.py               # Power quality data prep
 ├── scripts/                            # Data pipeline
 │   ├── export.py                       # DB → Parquet (requires database access)
-│   └── clean_readings.py              # Raw readings → clean 15-min time series
-├── paper/                            # LaTeX source files for data descriptor
+│   ├── clean_readings.py               # Raw readings → clean 15-min time series
+│   └── flatten.py                      # Reorganize data/ into flat layout for Zenodo upload
+├── paper/                              # LaTeX source files for data descriptor
 ├── explore/                            # Ad-hoc SQL analysis queries
 │   └── *.sql
 ├── Data Dictionary.md                  # Column-level documentation for all tables

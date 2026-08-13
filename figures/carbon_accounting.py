@@ -39,7 +39,8 @@ RESIDENTIAL_THRESHOLD_KWH = 55.0        # 0.055 MWh in kWh
 EF_RESIDENTIAL_BELOW = 2.72 / 1000     # tCO2e/kWh
 EF_ABOVE = 0.80 / 1000                 # tCO2e/kWh (residential above threshold + all others)
 
-CLEAN_DIR = Path("data/sparkmeterreadings_clean")
+CLEAN_DIR = Path("data")
+CLEAN_PREFIX = "sparkmeterreadings_clean_"
 OUT_DIR = Path("paper/graphics")
 
 # ---------------------------------------------------------------------------
@@ -103,14 +104,15 @@ def annualize_file(f: Path) -> pd.DataFrame:
 
 def load_all_sites() -> pd.DataFrame:
     frames = []
-    for f in sorted(CLEAN_DIR.glob("*.parquet")):
-        if is_uuid(f.stem):
+    for f in sorted(CLEAN_DIR.glob(f"{CLEAN_PREFIX}*.parquet")):
+        site = f.stem.removeprefix(CLEAN_PREFIX)
+        if is_uuid(site):
             continue
-        project = stem_to_project(f.stem)
+        project = stem_to_project(site)
         annual, n_rows = annualize_file(f)
         annual["project"] = project
         frames.append(annual)
-        print(f"  Loaded {f.stem} → '{project}' ({n_rows:,} rows)")
+        print(f"  Loaded {site} → '{project}' ({n_rows:,} rows)")
 
     annual = pd.concat(frames, ignore_index=True)
     # Kalobeyei sub-sites roll up to one project; re-sum in case a customer
@@ -179,7 +181,7 @@ def main() -> None:
 
     # Project metadata
     proj_meta = pd.read_parquet(
-        "data/minigridprojects/data.parquet",
+        "data/minigridprojects.parquet",
         columns=["projectName", "sizePv", "capex"],
     ).rename(columns={"projectName": "project"})
 

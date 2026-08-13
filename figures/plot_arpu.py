@@ -101,7 +101,7 @@ def map_rates(years: pd.Series, rates: dict[int, float]) -> pd.Series:
 # ── 1. Load and filter payments ───────────────────────────────────────────────
 
 print("Loading paymentconfirmations …")
-pc = pd.read_parquet("data/paymentconfirmations/data.parquet")
+pc = pd.read_parquet("data/paymentconfirmations.parquet")
 
 pc["country"] = pc["country"].str.strip().str.title()
 
@@ -149,7 +149,7 @@ if args.convert_usd:
 # ── 3. Join customer types ────────────────────────────────────────────────────
 
 cust = pd.read_parquet(
-    "data/customers/data.parquet",
+    "data/customers.parquet",
     columns=["customerAccountNumber", "customerType"],
 )
 pay = pay.merge(cust, on="customerAccountNumber", how="left")

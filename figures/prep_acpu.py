@@ -85,15 +85,16 @@ def aggregate_file(fpath):
     return agg, n_rows
 
 
-data_dir = Path("data/sparkmeterreadings_clean")
-all_files = sorted(data_dir.glob("*.parquet"))
-named_files = [f for f in all_files if not re.match(r"[0-9a-f]{8}-", f.stem)]
+CLEAN_PREFIX = "sparkmeterreadings_clean_"
+data_dir = Path("data")
+all_files = sorted(data_dir.glob(f"{CLEAN_PREFIX}*.parquet"))
+named_files = [f for f in all_files if not re.match(r"[0-9a-f]{8}-", f.stem.removeprefix(CLEAN_PREFIX))]
 
 print(f"Processing {len(named_files)} site parquet files …")
 
 monthly_chunks = []
 for fpath in named_files:
-    stem = fpath.stem
+    stem = fpath.stem.removeprefix(CLEAN_PREFIX)
     if stem not in FILENAME_MAP:
         print(f"  Skipping unmapped file: {fpath.name}", file=sys.stderr)
         continue
