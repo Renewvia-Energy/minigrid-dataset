@@ -38,15 +38,19 @@ minigrid-dataset/
 │   ├── plot_carbon_accounting.py       # Carbon offset estimates by site
 │   ├── carbon_accounting.py            # Carbon accounting calculations
 │   ├── plot_power_quality.py           # Voltage/frequency power quality metrics
-│   └── power_quality.py               # Power quality data prep
+│   └── power_quality.py                # Power quality data prep
 ├── scripts/                            # Data pipeline
 │   ├── export.py                       # DB → Parquet (requires database access)
 │   ├── clean_readings.py               # Raw readings → clean 15-min time series
-│   └── flatten.py                      # Reorganize data/ into flat layout for Zenodo upload
+│   ├── flatten.py                      # Reorganize data/ into flat layout for Zenodo upload
+│   └── upload.py                       # Upload data/ files to Zenodo
 ├── paper/                              # LaTeX source files for data descriptor
 ├── explore/                            # Ad-hoc SQL analysis queries
 │   └── *.sql
+├── .env.example                        # Example .env file; IUO
+├── .gitignore                          # Files not to be uploaded to GitHub
 ├── Data Dictionary.md                  # Column-level documentation for all tables
+├── notes.md                            # Notes on data tables, quality, anonymization, ideas for analysis, etc.
 ├── requirements.txt                    # Python dependencies for figures/ and scripts/
-└── README.md
+└── README.md                           # This document
 ```
