@@ -39,10 +39,17 @@ def getBucketUrl(base_url, headers):
 	print('Error: deposition not found')
 	exit(-1)
 
-def getUploadedFilenames(base_url, deposition_id, headers):
+def getUploadedFiles(base_url, deposition_id, headers):
 	r = requests.get(f'{base_url}/deposit/depositions/{deposition_id}/files', headers=headers)
 	r.raise_for_status()
-	return {f['filename'] for f in r.json()}
+	return {f['filename']: f['filesize'] for f in r.json()}
+
+def humanSize(num_bytes):
+	size = float(num_bytes)
+	for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+		if size < 1024 or unit == 'TB':
+			return f'{size:.1f}{unit}'
+		size /= 1024
 
 def main():
 	parser = argparse.ArgumentParser(description="Upload files to Zenodo.")
@@ -59,11 +66,14 @@ def main():
 		print(f'Uploading {args.file}')
 		print(uploadFile(args.file, bucket_url, HEADERS).json())
 	else:
-		uploaded = getUploadedFilenames(BASE_URL, os.environ['ZENODO_DEPOSITION_ID'], HEADERS)
+		uploaded = getUploadedFiles(BASE_URL, os.environ['ZENODO_DEPOSITION_ID'], HEADERS)
 		all_files = sorted(f for f in os.listdir(DATA_DIR) if os.path.isfile(os.path.join(DATA_DIR, f)))
 		to_upload = [f for f in all_files if f not in uploaded]
 
-		print(f'{len(uploaded)} file(s) already in bucket, {len(to_upload)} to upload.')
+		uploaded_size = sum(uploaded.values())
+		to_upload_size = sum(os.path.getsize(os.path.join(DATA_DIR, f)) for f in to_upload)
+
+		print(f'{len(uploaded)} file(s) already in bucket ({humanSize(uploaded_size)}), {len(to_upload)} to upload ({humanSize(to_upload_size)}).')
 		failed = []
 		for filename in to_upload:
 			path = os.path.join(DATA_DIR, filename)
