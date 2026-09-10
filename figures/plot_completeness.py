@@ -30,7 +30,7 @@ Input:  the published clean series, one parquet per site, in either layout:
 
 Usage:
   python figures/plot_completeness.py
-  python figures/plot_completeness.py --data-dir data --out figures/fig_completeness
+  python figures/plot_completeness.py --data-dir data --out paper/graphics/fig_completeness
 
 Outputs <out>.png (screen resolution) and <out>.pdf (vector, for submission).
 """
@@ -132,7 +132,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", default="data")
-    ap.add_argument("--out", default="figures/fig_completeness")
+    ap.add_argument("--out", default="paper/graphics/fig_completeness")
     ap.add_argument("--include-imputed", action="store_true",
                     help="count profile/uniform-imputed slots as valid "
                          "(default: directly observed slots only)")
