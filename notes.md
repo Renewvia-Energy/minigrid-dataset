@@ -7,7 +7,7 @@ Running log of findings. Updated as exploration progresses.
 |--------|-------|
 | Total tables | 31 (several are views — see below) |
 | Total size (approx) | ~400 GB on MySQL |
-| Largest table | `sparkmeterreadings` — 363M rows, 347 GB |
+| Largest table | `sparkmeterreadings` — 471M rows, 347 GB |
 | Second largest | `encryptedPhoneNumbers` — 198M rows, 50 GB |
 | Countries covered | Kenya, Nigeria |
 | Companies | Renewvia Energy Kenya Ltd (REKL), Renewvia Solar Nigeria Ltd (RSNL) |
@@ -50,7 +50,7 @@ Running log of findings. Updated as exploration progresses.
 ## Key findings per table
 
 ### `sparkmeterreadings` (core dataset)
-- 363 million 15-minute heartbeat records from SparkMeter devices
+- 471 million 15-minute heartbeat records from SparkMeter devices
 - Covers multiple metering platforms: `thundercloud`, `koios`, `steamaco`
 - Three `meter_type` values: `customer`, `totalizer`, `pue` (Productive Use Equipment)
 - **Energy fields**:

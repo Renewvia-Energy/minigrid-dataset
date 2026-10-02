@@ -1,499 +1,338 @@
 #!/usr/bin/env python3
 """
-Plot the 24-hour average load profile for a given tariff across one or more sites.
+Plot 24-hour load profiles from precomputed statistics CSVs.
 
-Outputs four plots for each run (all combinations of aggregation and spread):
-  - mean + 95% CI, 15-minute slots
-  - mean + 95% CI, hourly totals
-  - median + Q1–Q3, 15-minute slots
-  - median + Q1–Q3, hourly totals
+Reads the outputs of prep_load_profile.py and saves figures to paper/graphics/.
 
-Customers are identified by joining to the raw SparkMeter tariff names
-(meter_tariff_name containing the given tariff string, case-insensitive).
-The UTC offset is looked up from minigridprojects unless overridden.
+Run prep_load_profile.py first.
+
+Outputs (for each tariff):
+  paper/graphics/load_profile_{tariff}_{centre}_{site}{hourly}{obs}.png
+      Four variants per tariff: mean + 95% CI and median + IQR, each at
+      15-min and hourly resolution.
+
+  With --side-by-side TARIFF_A TARIFF_B:
+  paper/graphics/load_profile_{tariff_a}_vs_{tariff_b}_{site}{obs}.png
+      Panels (a) and (b): median + IQR + dashed mean at 15-min resolution.
+      Panel (c): ACF mean across sites (if acf_periodicity.py has been run).
 
 Usage:
-  python figures/plot_load_profile.py <parquet_file> [<parquet_file> ...] <tariff> [options]
-  python figures/plot_load_profile.py --all <tariff> [options]
-
-Examples:
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Ndeda.parquet Residential
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Akipelai.parquet Residential --utc-offset 3
-  python figures/plot_load_profile.py data/sparkmeterreadings_clean_Ndeda.parquet data/sparkmeterreadings_clean_Akipelai.parquet Residential
-  python figures/plot_load_profile.py --all Residential
-
-Optional arguments:
-  --all               Use all parquet files in data/sparkmeterreadings_clean/
-  --utc-offset INT    UTC offset in hours (applied to all sites; default: looked up per site)
-  --observed-only     Include only slots with imputation_method='observed'
+  python figures/plot_load_profile.py                                      # all tariffs in meta
+  python figures/plot_load_profile.py Residential                          # one tariff
+  python figures/plot_load_profile.py --side-by-side Residential Commercial
+  python figures/plot_load_profile.py Residential Commercial --side-by-side Residential Commercial
 """
 
 import argparse
+import importlib.util
 import sys
-import tempfile
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")  # non-interactive backend; remove to show a window
+matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.compute as pc
-import pyarrow.dataset as ds
-import pyarrow.parquet as pq
 
 SLOT_MINUTES = 15
-BATCH_SIZE = 2_000_000
-SHUFFLE_BATCH_SIZE = 10_000_000
+OUT_DIR = Path("paper/graphics")
+META_PATH = OUT_DIR / "load_profile_meta.csv"
 
 
-def most_common_tariff_by_customer(raw_files):
-    """
-    Tally (customer, tariff) occurrences using Arrow's native group_by
-    instead of pandas: converting these columns to pandas object dtype
-    (tens of millions of individual Python string allocations, most of
-    them repeats of a small set of values) is what exhausts memory here,
-    not the row count itself.
-    """
-    # Stream and column-project each file individually rather than building
-    # one multi-file Dataset: some years (e.g. an early partial year with
-    # zero readings) have meter_customer_code/meter_tariff_name typed `null`
-    # by parquet since every value is null, which fails Dataset's automatic
-    # schema unification against years typed `string`. Casting explicitly
-    # per batch sidesteps that; streaming with bounded readahead keeps a
-    # multi-year raw file (tens of millions of rows) from spiking memory.
-    scan_kwargs = dict(batch_size=BATCH_SIZE, batch_readahead=1, fragment_readahead=1, use_threads=False)
-    tables = []
-    for f in raw_files:
-        scanner = ds.dataset(f, format="parquet").scanner(
-            columns=["meter_customer_code", "meter_tariff_name"], **scan_kwargs
-        )
-        batches = []
-        for batch in scanner.to_batches():
-            cust = batch.column("meter_customer_code").cast(pa.string())
-            tariff = batch.column("meter_tariff_name").cast(pa.string())
-            valid = pc.is_valid(tariff)
-            filtered = pa.record_batch(
-                [pc.filter(cust, valid), pc.filter(tariff, valid)],
-                names=["meter_customer_code", "meter_tariff_name"],
-            )
-            if filtered.num_rows:
-                batches.append(filtered)
-        if batches:
-            tables.append(pa.Table.from_batches(batches))
-    table = pa.concat_tables(tables)
-    counts = (
-        table.group_by(["meter_customer_code", "meter_tariff_name"])
-        .aggregate([("meter_tariff_name", "count")])
-        .to_pandas()
-    )
-    idx = counts.groupby("meter_customer_code")["meter_tariff_name_count"].idxmax()
-    return counts.loc[idx].set_index("meter_customer_code")["meter_tariff_name"]
+def load_stats(tariff_slug):
+    """Read a stats CSV back into the group_stats dict used by the plot code."""
+    path = OUT_DIR / f"load_profile_stats_{tariff_slug}.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    slot = df[df["type"] == "slot"].drop(columns="type").set_index("group").reindex(range(96))
+    hour = df[df["type"] == "hour"].drop(columns="type").set_index("group").reindex(range(24))
+    return {"tod_slot": slot, "tod_hour": hour}
 
 
-def load_site_reduced(clean_path, matching_codes, utc_offset, observed_only):
-    """
-    Filter a site's clean parquet file to matching customers using Arrow's
-    dataset scanner (filter pushdown into the native engine, no pandas
-    object columns materialized for excluded rows) and reduce immediately
-    to (tod_slot, tod_hour, energy_kwh). Full clean files hold tens of
-    millions of rows; loading them into pandas string columns exhausts
-    memory on this machine even when most rows are filtered right back out.
-    """
-    dataset = ds.dataset(clean_path, format="parquet")
-    filter_expr = (ds.field("meter_type") == "customer") & ds.field("meter_customer_code").isin(
-        list(matching_codes)
-    )
-    if observed_only:
-        filter_expr = filter_expr & (ds.field("imputation_method") == "observed")
-
-    scan_kwargs = dict(batch_size=BATCH_SIZE, batch_readahead=1, fragment_readahead=1, use_threads=False)
-
-    # Count first so the output arrays can be allocated once; accumulating a
-    # list of per-batch arrays and concatenating at the end briefly holds
-    # both the fragmented parts and the final array at once (~2x peak), which
-    # is enough to exhaust memory on this machine for large sites.
-    n_matching = dataset.scanner(columns=["slot_start"], filter=filter_expr, **scan_kwargs).count_rows()
-    tod_slot = np.empty(n_matching, dtype="int16")
-    tod_hour = np.empty(n_matching, dtype="int8")
-    energy_kwh = np.empty(n_matching, dtype="float64")
-
-    pos = 0
-    scanner = dataset.scanner(columns=["slot_start", "energy_kwh"], filter=filter_expr, **scan_kwargs)
-    for batch in scanner.to_batches():
-        n = batch.num_rows
-        if n == 0:
-            continue
-        bdf = batch.to_pandas()
-        slot_start_local = bdf["slot_start"] + pd.Timedelta(hours=utc_offset)
-        minutes = slot_start_local.dt.hour * 60 + slot_start_local.dt.minute
-        tod_slot[pos:pos + n] = (minutes // SLOT_MINUTES).to_numpy()
-        tod_hour[pos:pos + n] = slot_start_local.dt.hour.to_numpy()
-        energy_kwh[pos:pos + n] = bdf["energy_kwh"].to_numpy()
-        pos += n
-
-    return pd.DataFrame({"tod_slot": tod_slot, "tod_hour": tod_hour, "energy_kwh": energy_kwh})
-
-
-def stats_row(grp, arr):
-    n = arr.size
-    if n == 0:
-        return {"grp": grp, "mean": np.nan, "std": np.nan, "n": 0, "median": np.nan, "q1": np.nan, "q3": np.nan}
-    return {
-        "grp": grp,
-        "mean": arr.mean(),
-        "std": arr.std(ddof=1) if n > 1 else np.nan,
-        "n": n,
-        "median": np.quantile(arr, 0.5),
-        "q1": np.quantile(arr, 0.25),
-        "q3": np.quantile(arr, 0.75),
-    }
-
-
-def shuffle_to_slot_files(flat_files, tmp_path, n_slots=96):
-    """
-    Single streaming pass over every site's flat reduced file, splitting
-    rows into one file per tod_slot value (0..95) via persistent writer
-    handles. Calling ds.write_dataset once per site instead (hive
-    partitioning into 96 directories, 27 times) spent 35+ minutes on a
-    single large site alone — repeated per-call overhead against a growing
-    set of partition directories. One combined single-threaded pass with
-    the 96 output files opened once is far cheaper.
-    """
-    paths = [tmp_path / f"slot_{i}.parquet" for i in range(n_slots)]
-    writers = [None] * n_slots
-    dataset = ds.dataset(flat_files, format="parquet")
-    scanner = dataset.scanner(
-        columns=["tod_slot", "energy_kwh"],
-        batch_size=SHUFFLE_BATCH_SIZE,
-        batch_readahead=1,
-        fragment_readahead=1,
-        use_threads=False,
-    )
-    try:
-        for batch in scanner.to_batches():
-            if batch.num_rows == 0:
-                continue
-            slots = batch.column("tod_slot").to_numpy()
-            energy = batch.column("energy_kwh")
-            for slot in np.unique(slots):
-                sub = pa.table({"energy_kwh": pc.filter(energy, pa.array(slots == slot))})
-                if writers[slot] is None:
-                    writers[slot] = pq.ParquetWriter(paths[slot], sub.schema)
-                writers[slot].write_table(sub)
-    finally:
-        for w in writers:
-            if w is not None:
-                w.close()
-    return paths
-
-
-def compute_group_stats(slot_paths):
-    """
-    Read the tod_slot-shuffled data back one slot (of 96) at a time and
-    compute exact mean/std/count/median/IQR with numpy. A slot's data across
-    all sites is a small, bounded slice (~total_rows/96); processing one
-    slot at a time keeps memory well under this machine's limit, unlike
-    materializing the combined ~700M-row dataset (or DuckDB's own grouped
-    quantile computation over it, which spills to disk so slowly it still
-    gets OOM-killed before finishing). Slot and hour stats are produced in
-    the same pass since tod_hour is just tod_slot // 4.
-    """
-    slot_rows = []
-    hour_rows = []
-    for hour in range(24):
-        hour_arrays = []
-        for slot in range(4 * hour, 4 * hour + 4):
-            p = slot_paths[slot]
-            arr = pq.read_table(p, columns=["energy_kwh"])["energy_kwh"].to_numpy() if p.exists() else np.array([], dtype="float64")
-            slot_rows.append(stats_row(slot, arr))
-            hour_arrays.append(arr)
-        hour_arr = np.concatenate(hour_arrays) if hour_arrays else np.array([], dtype="float64")
-        hour_rows.append(stats_row(hour, hour_arr))
-
-    return {
-        "tod_slot": pd.DataFrame(slot_rows).set_index("grp").reindex(range(96)),
-        "tod_hour": pd.DataFrame(hour_rows).set_index("grp").reindex(range(24)),
-    }
-
-
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(
-    description="Plot 24-hour load profile from clean sparkmeterreadings parquet file(s)."
+    description="Plot load profiles from CSVs produced by prep_load_profile.py."
 )
 parser.add_argument(
-    "parquet_files",
-    nargs="+",
-    help="Path(s) to sparkmeterreadings_clean_*.parquet files in data/. Last positional argument is the tariff. With --all, the only positional argument is the tariff.",
+    "tariffs",
+    nargs="*",
+    help="Tariff name(s) to plot. Defaults to all tariffs in load_profile_meta.csv.",
 )
 parser.add_argument(
-    "--all", action="store_true", dest="use_all",
-    help="Use all parquet files in data/sparkmeterreadings_clean/ instead of specifying files explicitly.",
-)
-parser.add_argument(
-    "--utc-offset", type=int, default=None, metavar="HOURS",
-    help="UTC offset in hours applied to all sites. Looked up per site from minigridprojects if omitted.",
-)
-parser.add_argument(
-    "--observed-only", action="store_true",
-    help="Include only slots with imputation_method='observed' (direct meter readings).",
+    "--side-by-side", nargs=2, metavar=("TARIFF_A", "TARIFF_B"),
+    help="Produce a two-panel comparison figure for the given pair of tariffs.",
 )
 args = parser.parse_args()
 
-# Last positional arg is the tariff; the rest are parquet files
-if args.use_all:
-    if len(args.parquet_files) != 1:
-        print("Error: with --all, provide only the tariff as a positional argument.", file=sys.stderr)
-        sys.exit(1)
-    tariff = args.parquet_files[0]
-    data_dir = Path("data")
-    file_paths = sorted(data_dir.glob("sparkmeterreadings_clean_*.parquet"))
-    if not file_paths:
-        print(f"Error: no sparkmeterreadings_clean_*.parquet files found in {data_dir}", file=sys.stderr)
-        sys.exit(1)
-    print(f"Using all {len(file_paths)} clean site parquet files in {data_dir}")
-else:
-    tariff = args.parquet_files[-1]
-    file_paths = [Path(p) for p in args.parquet_files[:-1]]
-    if not file_paths:
-        print("Error: at least one parquet file must be provided before the tariff.", file=sys.stderr)
-        sys.exit(1)
-
 # ---------------------------------------------------------------------------
-# Load meteringbasestations + minigridprojects once for UTC offset lookups
+# Load metadata
 # ---------------------------------------------------------------------------
-utc_by_station = None
-if args.utc_offset is None:
-    data_root = file_paths[0].parent
-    stations = pd.read_parquet(
-        data_root / "meteringbasestations.parquet",
-        columns=["meteringBaseStation", "projectName"],
+if not META_PATH.exists():
+    print(
+        f"Error: {META_PATH} not found. Run `python figures/prep_load_profile.py` first.",
+        file=sys.stderr,
     )
-    proj = pd.read_parquet(
-        data_root / "minigridprojects.parquet",
-        columns=["projectName", "timezoneOffsetUtc"],
-    )
-    utc_by_station = (
-        stations.merge(proj, on="projectName", how="left")
-        .set_index(stations["meteringBaseStation"].str.replace(" ", "_"))
-        ["timezoneOffsetUtc"]
-    )
-
-# ---------------------------------------------------------------------------
-# Loop over sites: resolve UTC offset, find matching meters, load clean data.
-# Each site's reduced readings are spilled to a flat temp parquet file
-# rather than kept in a Python list: across all 27 sites the combined
-# reduced data can run into the multiple-GB range, more than this machine's
-# RAM holds at once. They get shuffled into tod_slot-partitioned files in a
-# single combined pass afterward (see shuffle_to_slot_files), rather than
-# partitioning per site here, which was far slower.
-# ---------------------------------------------------------------------------
-tmp_dir_ctx = tempfile.TemporaryDirectory(prefix="load_profile_")
-tmp_path = Path(tmp_dir_ctx.name)
-flat_files = []
-site_names = []
-utc_offsets = []
-n_meters_total = 0
-n_obs_total = 0
-
-for clean_path in file_paths:
-    site_name = clean_path.stem.removeprefix("sparkmeterreadings_clean_")
-    data_root = clean_path.parent
-
-    # Resolve UTC offset for this site
-    if args.utc_offset is not None:
-        utc_offset = args.utc_offset
-    elif site_name in utc_by_station.index and pd.notna(utc_by_station[site_name]):
-        utc_offset = int(utc_by_station[site_name])
-    else:
-        print(f"Warning: UTC offset not found for '{site_name}'.", file=sys.stderr)
-        while True:
-            raw = input(f"  Enter UTC offset in hours for {site_name} (e.g. 3): ").strip()
-            try:
-                utc_offset = int(raw)
-                break
-            except ValueError:
-                print("  Please enter an integer.", file=sys.stderr)
-
-    print(f"Site: {site_name}  |  UTC offset: {utc_offset:+d}h")
-
-    # Find matching customer codes from raw data
-    raw_path = data_root / f"sparkmeterreadings_{site_name}.parquet"
-    if not raw_path.exists():
-        print(f"Error: raw parquet file not found: {raw_path}", file=sys.stderr)
-        sys.exit(1)
-    raw_files = [raw_path]
-
-    most_common_tariff = most_common_tariff_by_customer(raw_files)
-    matching_codes = most_common_tariff[
-        most_common_tariff.str.contains(tariff, case=False, na=False)
-    ].index
-
-    if matching_codes.empty:
-        print(
-            f"  Warning: no meters found with tariff containing '{tariff}' at {site_name}. "
-            f"Available tariffs: {most_common_tariff.dropna().unique().tolist()}",
-            file=sys.stderr,
-        )
-        continue
-
-    print(f"  Tariff filter '{tariff}': {len(matching_codes)} meters matched")
-    n_meters_total += len(matching_codes)
-
-    # Load and filter clean data, streamed in batches to bound memory use,
-    # then spill straight to disk rather than holding it alongside other sites.
-    site_df = load_site_reduced(clean_path, matching_codes, utc_offset, args.observed_only)
-    n_obs_total += len(site_df)
-    site_file = tmp_path / f"{site_name}.parquet"
-    site_df.to_parquet(site_file, index=False)
-    del site_df
-    flat_files.append(str(site_file))
-    site_names.append(site_name)
-    utc_offsets.append(utc_offset)
-
-if not flat_files:
-    print(f"Error: no matching meters found across any of the provided sites.", file=sys.stderr)
-    tmp_dir_ctx.cleanup()
     sys.exit(1)
 
-print(f"Rows after filtering: {n_obs_total:,}")
+meta = pd.read_csv(META_PATH)
 
-# ---------------------------------------------------------------------------
-# Shared labels / slugs (computed once)
-# ---------------------------------------------------------------------------
-if len(site_names) == 1:
-    site_label = site_names[0]
-    site_slug = site_names[0]
-elif len(site_names) <= 3:
-    site_label = " + ".join(site_names)
-    site_slug = "_".join(site_names)
+# Resolve which tariffs to plot for the four-variant figures
+if args.tariffs:
+    slugs_requested = [t.lower().replace(" ", "_").replace("/", "_") for t in args.tariffs]
+    missing = [s for s in slugs_requested if s not in meta["tariff_slug"].values]
+    if missing:
+        print(
+            f"Error: no stats found for {missing}. "
+            "Available: " + ", ".join(meta["tariff_slug"].tolist()),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    plot_meta = meta[meta["tariff_slug"].isin(slugs_requested)]
 else:
-    site_label = f"{len(site_names)} Sites"
-    site_slug = f"{len(site_names)}_sites"
+    plot_meta = meta
 
-unique_offsets = sorted(set(utc_offsets))
-tz_label = f"UTC{unique_offsets[0]:+d}" if len(unique_offsets) == 1 else "local time"
-
-tariff_slug = tariff.lower().replace(" ", "_").replace("/", "_")
-observed_suffix = "_observed" if args.observed_only else ""
-
-OUT_DIR = Path("paper/graphics")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-n_customers = n_meters_total
-n_sites = len(site_names)
-n_obs = n_obs_total
-site_info = f"{n_sites} sites · " if n_sites > 1 else ""
+# ---------------------------------------------------------------------------
+# Four-variant figures (one per tariff)
+# ---------------------------------------------------------------------------
+for _, row in plot_meta.iterrows():
+    tariff       = row["tariff"]
+    tariff_slug  = row["tariff_slug"]
+    n_customers  = int(row["n_customers"])
+    n_obs        = int(row["n_obs"])
+    n_sites      = int(row["n_sites"])
+    site_label   = row["site_label"]
+    site_slug    = row["site_slug"]
+    tz_label     = row["tz_label"]
+    observed_only = bool(row["observed_only"])
+
+    group_stats = load_stats(tariff_slug)
+    if group_stats is None:
+        print(f"Warning: stats file missing for '{tariff_slug}', skipping.", file=sys.stderr)
+        continue
+
+    observed_suffix = "_observed" if observed_only else ""
+    site_info = f"{n_sites} sites · " if n_sites > 1 else ""
+
+    all_stats = []
+    for hourly, use_median in [(False, False), (True, False), (False, True), (True, True)]:
+        if hourly:
+            group_col    = "tod_hour"
+            scale        = 4 * 1000  # avg kWh/15min → total Wh/hour
+            times        = pd.date_range("00:00", periods=24, freq="1h")
+            end_padding  = pd.Timedelta(hours=1)
+            time_unit    = "hour"
+            hourly_suffix = "_hourly"
+        else:
+            group_col    = "tod_slot"
+            scale        = 1000  # kWh → Wh
+            times        = pd.date_range("00:00", periods=96, freq=f"{SLOT_MINUTES}min")
+            end_padding  = pd.Timedelta(minutes=SLOT_MINUTES)
+            time_unit    = "15 min"
+            hourly_suffix = ""
+
+        g = group_stats[group_col]
+
+        if use_median:
+            centre       = g["median"] * scale
+            lo           = g["q1"] * scale
+            hi           = g["q3"] * scale
+            centre_label = "Median"
+            band_label   = "Q1–Q3"
+            spread_desc  = "median + IQR"
+        else:
+            centre       = g["mean"] * scale
+            margin       = 1.96 * g["std"] / np.sqrt(g["n"]) * scale
+            lo           = (centre - margin).clip(lower=0)
+            hi           = centre + margin
+            centre_label = "Mean"
+            band_label   = "95% CI"
+            spread_desc  = "mean + 95% CI"
+
+        times_plot = times.append(pd.DatetimeIndex([times[-1] + end_padding]))
+
+        subtitle_parts = []
+        if observed_only:
+            subtitle_parts.append("observed only")
+        if hourly:
+            subtitle_parts.append("hourly totals")
+        subtitle_parts.append(spread_desc)
+
+        all_stats.append({
+            "times":        times_plot,
+            "centre":       np.append(centre.values, centre.values[0]),
+            "lo":           np.append(lo.values, lo.values[0]),
+            "hi":           np.append(hi.values, hi.values[0]),
+            "centre_label": centre_label,
+            "band_label":   band_label,
+            "time_unit":    time_unit,
+            "subtitle":     ", ".join(subtitle_parts),
+            "outfile":      OUT_DIR / f"load_profile_{tariff_slug}_{centre_label.lower()}_{site_slug}{hourly_suffix}{observed_suffix}.png",
+        })
+
+    for s in all_stats:
+        title  = f"24-Hour Load Profile — {tariff} Customers, {site_label}\n({s['subtitle']})"
+        ylabel = f"{s['centre_label']} energy (Wh per {s['time_unit']})"
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.fill_between(s["times"], s["lo"], s["hi"], alpha=0.25, color="#2563eb", label=s["band_label"])
+        ax.plot(s["times"], s["centre"], linewidth=1.5, color="#2563eb", label=s["centre_label"])
+
+        ax.set_xlabel(f"Time of day ({tz_label})")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.set_ylim(bottom=0)
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
+        ax.xaxis.set_minor_locator(mdates.HourLocator())
+        ax.set_xlim(s["times"][0], s["times"][-1])
+        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+        ax.grid(axis="y", linewidth=0.5, alpha=0.5)
+        ax.grid(axis="x", linewidth=0.3, alpha=0.3, which="minor")
+        ax.legend(loc="upper left", fontsize=9)
+
+        plt.tight_layout()
+        plt.savefig(s["outfile"], dpi=150)
+        plt.close(fig)
+        print(f"Saved {s['outfile'].resolve()}")
 
 # ---------------------------------------------------------------------------
-# Shuffle into tod_slot-partitioned files (one combined streaming pass),
-# then compute grouped stats reading one slot at a time (see
-# compute_group_stats) rather than concatenating everything into one
-# in-memory DataFrame.
+# Optional: side-by-side comparison figure (15-min, median + IQR + mean + ACF)
 # ---------------------------------------------------------------------------
-slot_paths = shuffle_to_slot_files(flat_files, tmp_path)
-group_stats = compute_group_stats(slot_paths)
-tmp_dir_ctx.cleanup()
+if args.side_by_side:
+    tariff_a_name, tariff_b_name = args.side_by_side
+    slug_a = tariff_a_name.lower().replace(" ", "_").replace("/", "_")
+    slug_b = tariff_b_name.lower().replace(" ", "_").replace("/", "_")
 
-# ---------------------------------------------------------------------------
-# Pre-compute stats for all four variants
-# ---------------------------------------------------------------------------
-all_stats = []
-for hourly, use_median in [(False, False), (True, False), (False, True), (True, True)]:
-    if hourly:
-        group_col = "tod_hour"
-        scale = 4 * 1000  # avg kWh/15min → total Wh/hour
-        times = pd.date_range("00:00", periods=24, freq="1h")
-        end_padding = pd.Timedelta(hours=1)
-        time_unit = "hour"
-        hourly_suffix = "_hourly"
+    for slug, name in [(slug_a, tariff_a_name), (slug_b, tariff_b_name)]:
+        if slug not in meta["tariff_slug"].values:
+            print(
+                f"Error: no stats found for '{name}'. "
+                "Run `python figures/prep_load_profile.py --tariffs {name}` first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    row_a = meta[meta["tariff_slug"] == slug_a].iloc[0]
+    row_b = meta[meta["tariff_slug"] == slug_b].iloc[0]
+
+    gs_a = load_stats(slug_a)
+    gs_b = load_stats(slug_b)
+
+    scale = 1000  # kWh → Wh
+    times = pd.date_range("00:00", periods=96, freq=f"{SLOT_MINUTES}min")
+    times_plot = times.append(pd.DatetimeIndex([times[-1] + pd.Timedelta(minutes=SLOT_MINUTES)]))
+
+    def _panel_arrays(group_stats):
+        g = group_stats["tod_slot"]
+        def _wrap(col):
+            v = (g[col] * scale).values
+            return np.append(v, v[0])
+        return _wrap("median"), _wrap("q1"), _wrap("q3"), _wrap("mean")
+
+    med_a, q1_a, q3_a, mean_a = _panel_arrays(gs_a)
+    med_b, q1_b, q3_b, mean_b = _panel_arrays(gs_b)
+
+    colors = ["#2563eb", "#16a34a"]
+
+    # Try to load ACF data for the third panel
+    acf_dir = OUT_DIR
+    acf_csvs = {
+        "native":   acf_dir / "acf_by_site_15min.csv",
+        "hourly":   acf_dir / "acf_by_site_hourly.csv",
+        "coverage": acf_dir / "acf_site_coverage.csv",
+    }
+    missing_csvs = [str(p) for p in acf_csvs.values() if not p.exists()]
+    include_acf = not missing_csvs
+    if missing_csvs:
+        print(
+            f"Warning: ACF CSVs not found ({', '.join(missing_csvs)}); "
+            "omitting ACF panel. Run `python figures/acf_periodicity.py` first.",
+            file=sys.stderr,
+        )
     else:
-        group_col = "tod_slot"
-        scale = 1000  # kWh → Wh
-        times = pd.date_range("00:00", periods=96, freq=f"{SLOT_MINUTES}min")
-        end_padding = pd.Timedelta(minutes=SLOT_MINUTES)
-        time_unit = "15 min"
-        hourly_suffix = ""
+        _spec = importlib.util.spec_from_file_location(
+            "_acf_plot_mod", Path(__file__).resolve().parent / "plot_acf_periodicity.py"
+        )
+        _acf_mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_acf_mod)
 
-    g = group_stats[group_col]
+        acf_native   = _acf_mod.lag_indexed(acf_csvs["native"])
+        acf_hourly   = _acf_mod.lag_indexed(acf_csvs["hourly"])
+        coverage     = pd.read_csv(acf_csvs["coverage"])
+        coverage["in_mean"] = _acf_mod.as_bool(coverage["in_mean"])
+        in_mean = [s for s in acf_native.columns
+                   if s in set(coverage.loc[coverage.in_mean, "site"])]
+        obs_per_site = (coverage.loc[coverage.in_mean, "n_slots"]
+                        - coverage.loc[coverage.in_mean, "n_missing"])
+        n_obs_acf = max(int(obs_per_site.min()), 1)
+        if not in_mean:
+            print("Warning: no sites passed the ACF missing-fraction gate; omitting ACF panel.", file=sys.stderr)
+            include_acf = False
 
-    if use_median:
-        centre = g["median"] * scale
-        lo = g["q1"] * scale
-        hi = g["q3"] * scale
-        centre_label = "Median"
-        band_label = "Q1–Q3"
-        spread_suffix = "_median"
-        spread_desc = "median + IQR"
+    # Build figure
+    if include_acf:
+        fig    = plt.figure(figsize=(14, 10))
+        gs_fig = fig.add_gridspec(2, 2, height_ratios=[5, 4.5], hspace=0.5)
+        ax_acf = fig.add_subplot(gs_fig[1, :])
     else:
-        centre = g["mean"] * scale
-        margin = 1.96 * g["std"] / np.sqrt(g["n"]) * scale
-        lo = (centre - margin).clip(lower=0)
-        hi = centre + margin
-        centre_label = "Mean"
-        band_label = "95% CI"
-        spread_suffix = "_mean_ci"
-        spread_desc = "mean + 95% CI"
+        fig    = plt.figure(figsize=(14, 5))
+        gs_fig = fig.add_gridspec(1, 2)
 
-    midnight = times[-1] + end_padding
-    times_plot = times.append(pd.DatetimeIndex([midnight]))
+    tz_label_a = row_a["tz_label"]
+    panels = [
+        (fig.add_subplot(gs_fig[0, 0]), med_a, q1_a, q3_a, mean_a,
+         tariff_a_name, int(row_a["n_customers"]), int(row_a["n_obs"]),
+         int(row_a["n_sites"]), colors[0]),
+        (fig.add_subplot(gs_fig[0, 1]), med_b, q1_b, q3_b, mean_b,
+         tariff_b_name, int(row_b["n_customers"]), int(row_b["n_obs"]),
+         int(row_b["n_sites"]), colors[1]),
+    ]
+    for panel_idx, (ax, med, q1, q3, mean, label, n_cust, n_obs_panel, n_s, color) in enumerate(panels):
+        ax.fill_between(times_plot, q1, q3, alpha=0.25, color=color, label="IQR (Q1–Q3)")
+        ax.plot(times_plot, med,  linewidth=1.5, color=color,             label="Median")
+        ax.plot(times_plot, mean, linewidth=1.0, color=color, linestyle="--", label="Mean")
 
-    subtitle_parts = []
-    if args.observed_only:
-        subtitle_parts.append("observed only")
-    if hourly:
-        subtitle_parts.append("hourly totals")
-    subtitle_parts.append(spread_desc)
+        ax.set_title(f"{label} Customers")
+        ax.set_xlabel(f"Time of day ({tz_label_a})")
+        ax.set_ylabel("Energy (Wh per 15 min)")
+        ax.set_ylim(bottom=0)
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
+        ax.xaxis.set_minor_locator(mdates.HourLocator())
+        ax.set_xlim(times_plot[0], times_plot[-1])
+        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+        ax.grid(axis="y", linewidth=0.5, alpha=0.5)
+        ax.grid(axis="x", linewidth=0.3, alpha=0.3, which="minor")
+        ax.legend(loc="upper left", fontsize=9)
+        panel_site_info = f"{n_s} sites · " if n_s > 1 else ""
+        ax.text(
+            0.01, 0.88,
+            f"{panel_site_info}{n_cust} customers · {n_obs_panel:,} slots",
+            transform=ax.transAxes, va="top", fontsize=9, color="gray",
+        )
+        ax.text(-0.07, 1.02, "ab"[panel_idx], transform=ax.transAxes,
+                fontsize=11, fontweight="bold", va="bottom", ha="right")
 
-    all_stats.append({
-        "times": times_plot,
-        "centre": np.append(centre.values, centre.values[0]),
-        "lo": np.append(lo.values, lo.values[0]),
-        "hi": np.append(hi.values, hi.values[0]),
-        "centre_label": centre_label,
-        "band_label": band_label,
-        "time_unit": time_unit,
-        "subtitle": ", ".join(subtitle_parts),
-        "outfile": OUT_DIR / f"load_profile_{tariff_slug}_{centre_label.lower()}_{site_slug}{hourly_suffix}{observed_suffix}.png",
-    })
+    if include_acf:
+        _acf_mod.panel_mean(ax_acf, acf_native, acf_hourly, in_mean, n_obs_acf)
+        ax_acf.text(-0.07, 1.02, "c", transform=ax_acf.transAxes,
+                    fontsize=11, fontweight="bold", va="bottom", ha="right")
 
-# ---------------------------------------------------------------------------
-# Plot from pre-computed stats
-# ---------------------------------------------------------------------------
-for s in all_stats:
-    title = f"24-Hour Load Profile — {tariff} Customers, {site_label}\n({s['subtitle']})"
-    ylabel = f"{s['centre_label']} energy (Wh per {s['time_unit']})"
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-
-    ax.fill_between(s["times"], s["lo"], s["hi"], alpha=0.25, color="#2563eb", label=s["band_label"])
-    ax.plot(s["times"], s["centre"], linewidth=1.5, color="#2563eb", label=s["centre_label"])
-
-    ax.set_xlabel(f"Time of day ({tz_label})")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.set_ylim(bottom=0)
-
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax.xaxis.set_minor_locator(mdates.HourLocator())
-    ax.set_xlim(s["times"][0], s["times"][-1])
-    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-    ax.grid(axis="y", linewidth=0.5, alpha=0.5)
-    ax.grid(axis="x", linewidth=0.3, alpha=0.3, which="minor")
-
-    ax.legend(loc="upper left", fontsize=9)
-
-    ax.text(
-        0.01, 0.88,
-        f"{site_info}{n_customers} customers · {n_obs:,} slots",
-        transform=ax.transAxes,
-        va="top", fontsize=9, color="gray",
-    )
-
+    site_label_a  = row_a["site_label"]
+    observed_only = bool(row_a["observed_only"])
+    obs_note      = " (observed only)" if observed_only else ""
+    fig.suptitle(f"24-Hour Load Profiles — {site_label_a}{obs_note}", y=1.01)
     plt.tight_layout()
-    plt.savefig(s["outfile"], dpi=150)
+
+    observed_suffix = "_observed" if observed_only else ""
+    out_sbs = OUT_DIR / f"load_profile_{slug_a}_vs_{slug_b}_{row_a['site_slug']}{observed_suffix}.png"
+    plt.savefig(out_sbs, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved {s['outfile'].resolve()}")
+    print(f"Saved {out_sbs.resolve()}")

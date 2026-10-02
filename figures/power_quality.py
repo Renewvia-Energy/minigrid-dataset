@@ -35,7 +35,13 @@ OUT_DIR  = Path("paper/graphics")
 DATA_DIR = Path("data")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-COLS = ["voltageMin", "voltageMax", "voltageAvg", "powerFactorAvg", "meter_type"]
+COLS = ["voltageMin", "voltageMax", "voltageAvg", "powerFactorAvg", "meter_type",
+        "meter_id", "heartbeatStart"]
+
+# SMRPI-01-00018BCE at Kalobeyei 1A reported spurious ~132 V / PF~0.13 while
+# idle (current=0) before a firmware update on 2022-03-08. Exclude those readings.
+_BAD_METER_ID  = "d4be6f4d-9d59-4a8e-bff5-211b3fd51f94"
+_BAD_METER_END = pd.Timestamp("2022-03-08")
 
 V_LO,  V_HI,  V_BINS  = 50.0, 300.0, 250   # 1 V per bin
 PF_LO, PF_HI, PF_BINS =  0.0,   1.0, 200   # 0.005 per bin
@@ -56,6 +62,10 @@ site_files = sorted(
 for parquet_path in tqdm(site_files, desc="sites", unit="site"):
     chunk = pq.read_table(parquet_path, columns=COLS).to_pandas()
     chunk = chunk[chunk["meter_type"] == "customer"]
+    chunk = chunk[~(
+        (chunk["meter_id"] == _BAD_METER_ID)
+        & (pd.to_datetime(chunk["heartbeatStart"]) < _BAD_METER_END)
+    )]
 
     v_mask = (
         (chunk["voltageMin"] >  V_LO) & (chunk["voltageMin"] <= V_HI)

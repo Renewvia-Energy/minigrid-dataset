@@ -171,6 +171,16 @@ def main():
         gap = gap[gap > 15]
         gap_frames.append(pd.DataFrame({"gap": gap, "country": countries[site]}))
 
+    kalo_prefix = _norm("Kalobeyei Settlement")
+    kalo_sites = [s for s in monthly if _norm(s).startswith(kalo_prefix)]
+    if len(kalo_sites) > 1:
+        combined_label = "Kalobeyei Settlement"
+        monthly[combined_label] = pd.DataFrame(
+            {s: monthly.pop(s) for s in kalo_sites}
+        ).mean(axis=1)
+        first_slot[combined_label] = min(first_slot.pop(s) for s in kalo_sites)
+        countries[combined_label] = "Kenya"
+
     order = sorted(monthly, key=lambda s: first_slot[s])
     months = pd.period_range(min(m.index.min() for m in monthly.values()),
                              max(m.index.max() for m in monthly.values()), freq="M")
@@ -186,7 +196,7 @@ def main():
     im = ax.imshow(M.values, aspect="auto", cmap="Blues", vmin=0, vmax=100,
                    interpolation="nearest")
     ax.set_yticks(range(len(M)))
-    ax.set_yticklabels(M.index, fontsize=7.5)
+    ax.set_yticklabels([s.replace("_", " ") for s in M.index], fontsize=7.5)
     ticks = [i for i, m in enumerate(months) if m.month in (1, 7)]
     ax.set_xticks(ticks)
     ax.set_xticklabels([str(months[i]) for i in ticks], fontsize=7,
@@ -198,10 +208,10 @@ def main():
                 fontweight="bold", color=COUNTRY_COLORS.get(c, UNK_COLOR))
     fig.colorbar(im, ax=ax, shrink=.75, pad=.05).set_label(
         "monthly completeness (%)", fontsize=8)
-    ax.set_title("a   Monthly reading completeness per site, ordered by first "
-                 "operation\ncompleteness = directly observed 15-min slots / calendar "
-                 "slots; white = pre-commissioning or no data",
-                 loc="left", fontsize=9, fontweight="bold")
+    # ax.set_title("a   Monthly reading completeness per site, ordered by first "
+    #              "operation\ncompleteness = directly observed 15-min slots / calendar "
+    #              "slots; white = pre-commissioning or no data",
+    #              loc="left", fontsize=9, fontweight="bold")
 
     ax = fig.add_subplot(gs[1])
     bins = np.logspace(np.log10(15), np.log10(60 * 24 * 60), 70)
@@ -221,8 +231,8 @@ def main():
     ax.set_xlabel("gap between consecutive observed intervals (min)")
     ax.set_ylabel("density (log)")
     ax.legend(fontsize=8, frameon=False, loc="upper right")
-    ax.set_title(f"b   Gap-length distribution (n = {len(G):,} gaps > 15 min) between "
-                 "consecutive site-level observed slots", loc="left", fontsize=9, fontweight="bold", pad=10)
+    # ax.set_title(f"b   Gap-length distribution (n = {len(G):,} gaps > 15 min) between "
+    #              "consecutive site-level observed slots", loc="left", fontsize=9, fontweight="bold", pad=10)
 
     fig.savefig(args.out + ".png", dpi=165, bbox_inches="tight")
     fig.savefig(args.out + ".pdf", bbox_inches="tight")

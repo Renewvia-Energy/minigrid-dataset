@@ -365,10 +365,10 @@ for ax, country in zip(axes, COUNTRIES):
 
     n_cust = sub["customerAccountNumber"].nunique()
     n_obs  = len(sub)
-    ax.text(0.02, 0.97,
-            f"{n_cust:,} customers · {n_obs:,} user-months\n"
-            f"(y capped at 99th pct: {y_cap:,.2f} {curr})",
-            transform=ax.transAxes, va="top", fontsize=8, color="gray")
+    # ax.text(0.02, 0.97,
+    #         f"{n_cust:,} customers · {n_obs:,} user-months\n"
+    #         f"(y capped at 99th pct: {y_cap:,.2f} {curr})",
+    #         transform=ax.transAxes, va="top", fontsize=8, color="gray")
     ax.legend(fontsize=9, loc="upper right")
 
 if args.convert_usd:
@@ -452,7 +452,145 @@ fig.savefig(out, dpi=150, bbox_inches="tight")
 print(f"Saved {out.name}")
 plt.close(fig)
 
-# ── 10. Summary statistics ────────────────────────────────────────────────────
+# ── 10. Combined figure: ARPU histogram + tenure scatter (always USD) ────────
+
+# Build USD-converted monthly data if not already done
+if args.convert_usd:
+    monthly_usd = monthly
+else:
+    print("Fetching exchange rates for combined figure (USD) …")
+    wb_rates_combo = {c: fetch_wb_rates(WB_ISO2[c]) for c in COUNTRIES}
+
+    monthly_usd = monthly.copy()
+    monthly_usd["_yr"] = monthly_usd["ym"].apply(lambda p: p.year)
+    frames = []
+    for country in COUNTRIES:
+        sub = monthly_usd[monthly_usd["country"] == country].copy()
+        rate = map_rates(sub["_yr"], wb_rates_combo[country])
+        sub["monthly_revenue"] = sub["monthly_revenue"] / rate
+        frames.append(sub)
+    monthly_usd = pd.concat(frames, ignore_index=True).drop(columns=["_yr"])
+
+# arpu summary in USD
+arpu_usd = (
+    monthly_usd.groupby(
+        ["customerAccountNumber", "country", "cust_class", "projectName"],
+        observed=True,
+    )
+    .agg(arpu=("monthly_revenue", "mean"))
+    .reset_index()
+)
+arpu_usd = arpu_usd.merge(valid, on=["country", "projectName"], how="inner")
+
+# tenure column in USD monthly
+first_ym_usd = (
+    monthly_usd.groupby("customerAccountNumber")["ym"]
+    .min()
+    .rename("first_ym")
+)
+monthly2_usd = monthly_usd.join(first_ym_usd, on="customerAccountNumber")
+monthly2_usd["months_since_first"] = (
+    monthly2_usd["ym"].apply(lambda p: p.ordinal)
+    - monthly2_usd["first_ym"].apply(lambda p: p.ordinal)
+)
+
+# Draw 2×2 figure
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig.suptitle("ARPU Distribution and Revenue Trajectory (USD)", fontsize=13)
+
+COMBO_COLORS = {"Residential": "#2563eb", "Commercial": "#dc2626"}
+PANEL_LABELS = ["a", "b", "c", "d"]
+
+# Row 0: ARPU histograms by customer type
+for col, country in enumerate(COUNTRIES):
+    ax = axes[0, col]
+    sub = arpu_usd[
+        (arpu_usd["country"] == country) & (arpu_usd["cust_class"] != "Unknown")
+    ]
+
+    lo = max(sub["arpu"].quantile(0.01), 1e-3)
+    hi = sub["arpu"].quantile(0.99)
+    bins = np.logspace(np.log10(lo), np.log10(hi), 50)
+
+    for cls in ["Residential", "Commercial"]:
+        d = sub.loc[sub["cust_class"] == cls, "arpu"].dropna()
+        if d.empty:
+            continue
+        color = COMBO_COLORS[cls]
+        ax.hist(d, bins=bins, alpha=0.45, color=color,
+                label=f"{cls} (n={len(d):,})", density=True, zorder=2)
+        ax.axvline(d.mean(), color=color, linewidth=1.5, linestyle="--",
+                   label=f"{cls} mean: ${d.mean():.2f}", zorder=3)
+
+    ax.set_xscale("log")
+    ax.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x:,.2f}" if x < 1 else f"${x:,.0f}")
+    )
+    ax.set_xlabel("ARPU (USD/month, log scale)", fontsize=10)
+    ax.set_ylabel("Density", fontsize=10)
+    ax.set_title(f"({PANEL_LABELS[col]}) {country}", fontsize=11)
+    ax.legend(fontsize=8)
+    ax.grid(axis="both", linewidth=0.4, alpha=0.5)
+
+# Row 1: monthly revenue vs months since first payment
+for col, country in enumerate(COUNTRIES):
+    ax = axes[1, col]
+    sub = monthly2_usd[monthly2_usd["country"] == country].copy()
+
+    y_cap = sub["monthly_revenue"].quantile(0.99)
+    sub_plot = sub[sub["monthly_revenue"] <= y_cap]
+
+    ax.scatter(
+        sub_plot["months_since_first"],
+        sub_plot["monthly_revenue"],
+        alpha=0.04, s=3, color="#2563eb", rasterized=True,
+    )
+
+    by_tenure = (
+        sub.groupby("months_since_first")["monthly_revenue"]
+        .agg(mean="mean", count="count")
+        .query("count >= 10")
+        .reset_index()
+    )
+    if len(by_tenure) > 10:
+        sm = lowess(
+            by_tenure["mean"].values,
+            by_tenure["months_since_first"].values,
+            frac=0.2, return_sorted=True,
+        )
+        ax.plot(sm[:, 0], sm[:, 1], color="#dc2626", linewidth=2,
+                label="LOESS mean", zorder=5)
+
+    ax.set_xlim(left=-0.5)
+    ax.set_ylim(bottom=0, top=y_cap * 1.05)
+    ax.set_xlabel("Months since first payment", fontsize=10)
+    ax.set_ylabel("Monthly revenue (USD)", fontsize=10)
+    ax.set_title(f"({PANEL_LABELS[col + 2]}) {country}", fontsize=11)
+    ax.grid(axis="both", linewidth=0.4, alpha=0.4)
+    ax.legend(fontsize=9, loc="upper right")
+
+    n_cust = sub["customerAccountNumber"].nunique()
+    n_obs = len(sub)
+    # ax.text(
+    #     0.02, 0.97,
+    #     f"{n_cust:,} customers · {n_obs:,} user-months\n"
+    #     f"(y capped at 99th pct: ${y_cap:,.2f})",
+    #     transform=ax.transAxes, va="top", fontsize=8, color="gray",
+    # )
+
+fig.text(
+    0.5, -0.01,
+    "Exchange rates: World Bank PA.NUS.FCRF (official rate, LCU per US$, annual average)",
+    ha="center", fontsize=7, color="gray",
+)
+
+plt.tight_layout()
+out = OUT_DIR / "arpu_combined_usd.png"
+fig.savefig(out, dpi=150, bbox_inches="tight")
+print(f"Saved {out.name}")
+plt.close(fig)
+
+# ── 11. Summary statistics ────────────────────────────────────────────────────
 
 print("\n=== ARPU Summary ===")
 for country in COUNTRIES:

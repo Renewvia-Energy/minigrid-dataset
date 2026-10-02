@@ -119,8 +119,8 @@ def panel_scatter(ax, m, min_months, min_meters, full_year_months=9):
                            facecolor=col if validated else "none", edgecolor=col, alpha=0.85, zorder=3)
     x = np.array([10, 2000])
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlim(10, 2000); ax.set_ylim(10, 20000)
-    _caidi_lines(ax, (10,2000), (10, 20000))
+    ax.set_xlim(10, 5000); ax.set_ylim(10, 5000)
+    _caidi_lines(ax, (10, 5000), (10, 5000))
     ax.set_xlabel("SAIFI (interruptions per customer per year)")
     ax.set_ylabel("SAIDI (hours per customer per year)")
     handles = [Line2D([], [], marker="o", ls="", color=KE_COLOR, label="Kenya"),
@@ -142,7 +142,7 @@ def panel_duration(ax, d):
         med = hours[np.searchsorted(-ccdf, -0.5)]
         ax.plot([med, med], [0, 0.5], color=col, lw=0.8, ls=":", zorder=1)
         medians.append((country, med, col))
-    ax.set_xscale("log"); ax.set_xlim(0.25, 200); ax.set_ylim(0, 1)
+    ax.set_xscale("log"); ax.set_xlim(0.25, 1000); ax.set_ylim(0, 1)
     ax.set_xlabel("Interruption duration (h)")
     ax.set_ylabel("Share of interruptions lasting ≥ x")
     handles = [Line2D([], [], color=col, lw=2, label=f"{c} (median {med:g} h)") for c, med, col in medians]
@@ -196,8 +196,8 @@ def figure_siteyears(m, out_base, min_months, min_meters, full_year_months=9):
     colors = site_colors({c: g["unit"].unique() for c, g in sy.groupby("country")})
     fig, ax = plt.subplots(figsize=(9.5, 6.2))
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlim(10, 2000); ax.set_ylim(10, 20000)
-    _caidi_lines(ax, (10, 2000), (10, 20000))
+    ax.set_xlim(10, 5000); ax.set_ylim(10, 5000)
+    _caidi_lines(ax, (10, 5000), (10, 5000))
     legends = {}
     for country in COUNTRY_COLORS:
         handles = []
@@ -236,32 +236,24 @@ def figure_sites(m, out_base):
     st = indices(m, ["unit", "country", "project"])
     st = st[(st["saifi"] > 0) & (st["saidi"] > 0)]
     fig, ax = plt.subplots(figsize=(7, 6))
-    x = np.array([10, 2000])
+    x = np.array([100, 4000])
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlim(20, 1000); ax.set_ylim(80, 12000)
+    ax.set_xlim(100, 4000); ax.set_ylim(100, 4000)
     ax.xaxis.set_minor_formatter(LogFormatterSciNotation(labelOnlyBase=False, minor_thresholds=(2, 0.5)))
     ax.tick_params(axis="x", which="minor", labelsize=7, rotation=45)
     for dur, lab in ((0.25, "CAIDI 15 min"), (1, "1 h"), (4, "4 h"), (16, "16 h")):
         ax.plot(x, dur * x, color="#dddddd", lw=0.8, zorder=1)
-        if dur * 1000 <= 12000:
-            xl, yl, ha, va = 1000, dur * 1000, "right", "center"
+        if dur * 4000 <= 4000:
+            xl, yl, ha, va = 4000, dur * 4000, "right", "center"
         else:
-            xl, yl, ha, va = 12000 / dur, 12000, "center", "top"
+            xl, yl, ha, va = 4000 / dur, 4000, "center", "top"
         ax.annotate(lab, (xl, yl), fontsize=7, color="#777777", ha=ha, va=va, zorder=2,
                     bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none"))
     for country, col in COUNTRY_COLORS.items():
-        for validated in (True, False):
-            s = st[(st["country"] == country) & (st["project"].isin(VRM_PROJECTS) == validated)]
-            ax.scatter(s["saifi"], s["saidi"], s=40, lw=1.3, facecolor=col if validated else "none",
-                       edgecolor=col, zorder=3)
-    for _, r in st.iterrows():
-        name = r["unit"].replace("_", " ")
-        dx, dy, ha = SITE_LABEL_OFFSETS.get(name, (7, 0, "left"))
-        ax.annotate(name, (r["saifi"], r["saidi"]), fontsize=7, color=COUNTRY_COLORS[r["country"]],
-                    xytext=(dx, dy), textcoords="offset points", va="center", ha=ha, zorder=4)
+        s = st[st["country"] == country]
+        ax.scatter(s["saifi"], s["saidi"], s=40, lw=1.3, facecolor=col, edgecolor=col, zorder=3)
     ax.set_xlabel("SAIFI (interruptions per customer per year)")
     ax.set_ylabel("SAIDI (hours per customer per year)")
-    ax.set_title("Reliability indices by site", loc="left", fontsize=10)
     fig.tight_layout()
     ax.spines[["top", "right"]].set_visible(False)
     handles = [Line2D([], [], marker="o", ls="", color=KE_COLOR, label="Kenya"),
@@ -273,6 +265,10 @@ def figure_sites(m, out_base):
 def figure_class(m, out_base, roll_up):
     cls = indices(m, ["unit", "country", "cust_class"])
     wide = cls.pivot(index="unit", columns="cust_class", values=["saidi", "saifi", "meters"])
+    avail = wide.columns.get_level_values("cust_class")
+    if "Residential" not in avail or "Commercial" not in avail:
+        print(f"Skipping {out_base}_class: no Residential/Commercial breakdown")
+        return pd.DataFrame()
     ok = (wide["meters"]["Residential"] >= MIN_CLASS_METERS) & (wide["meters"]["Commercial"] >= MIN_CLASS_METERS)
     wide = wide[ok]
     ctry = cls.drop_duplicates("unit").set_index("unit")["country"]
@@ -318,7 +314,7 @@ def main():
     ap.add_argument("--min-months", type=int, default=1, help="months observed for a site-year point")
     ap.add_argument("--full-year-months", type=int, default=9,
                     help="site-years with fewer observed months are drawn with a small marker")
-    ap.add_argument("--min-meters", type=float, default=10, help="mean customers served for a site-year point")
+    ap.add_argument("--min-meters", type=float, default=1, help="mean customers served for a site-year point")
     a = ap.parse_args()
 
     m, d = load(a.graphics_dir, not a.keep_kalobeyei_villages)

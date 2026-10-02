@@ -13,9 +13,9 @@ Schema notes (see Data Dictionary):
     (e.g. PV_Inverter_32_L*_Power); all channels are numerically coerced here.
   * The genset channels record values only while the generator runs; absent
     values are treated as zero so all series share a common time basis.
-  * Timestamps in `timestamp_local` are in UTC, not site-local time: read as
-    local time, PV onset would precede astronomical sunrise at all sites,
-    which is physically impossible. Axis labels therefore say UTC.
+  * Timestamps in `timestamp_local` are stored in UTC despite the column name.
+    UTC offsets are looked up from minigridprojects (Kenya UTC+3, Nigeria UTC+1)
+    and applied before extracting the hour of day so axes show local time.
 
 Usage:
   python figures/plot_fleet_profiles.py
@@ -83,7 +83,14 @@ def main():
     if not os.path.exists(vrm_path):
         sys.exit(f"{vrm_path} not found")
     h = load_hourly(vrm_path)
-    h["hour"] = h.hour_ts.dt.hour
+
+    proj_path = os.path.join(args.data_dir, "minigridprojects.parquet")
+    utc_offset = pd.Series(dtype=int)
+    if os.path.exists(proj_path):
+        proj = pd.read_parquet(proj_path, columns=["projectName", "timezoneOffsetUtc"])
+        utc_offset = proj.drop_duplicates("projectName").set_index("projectName")["timezoneOffsetUtc"]
+    h["utc_offset"] = h["site"].map(utc_offset).fillna(0).astype(int)
+    h["hour"] = (h.hour_ts + pd.to_timedelta(h["utc_offset"], unit="h")).dt.hour
 
     hybrid = sorted(h[h.gen.fillna(0) > 0].site.unique())
     pv_only = sorted(set(h.site.unique()) - set(hybrid))
@@ -118,7 +125,7 @@ def main():
         ax2.set_ylim(0, 105); ax2.set_xlim(0, 23)
         ax2.set_ylabel("SOC (%)", color=SOC_C, fontsize=6.5)
         ax.set_xlim(0, 23); ax.set_ylim(bottom=0); ax.margins(x=0, y=0)
-        ax.set_xlabel("hour (UTC)"); ax.set_xticks(range(0, 24, 6))
+        ax.set_xlabel("hour (local time)"); ax.set_xticks(range(0, 24, 6))
         ax.set_ylabel("power (kW)")
         hA, lA = ax.get_legend_handles_labels()
         hB, lB = ax2.get_legend_handles_labels()

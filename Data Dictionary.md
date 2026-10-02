@@ -246,7 +246,7 @@
 ---
 
 ## Table: sparkmeterreadings
-**Purpose**: 15-minute heartbeat energy readings from SparkMeter meters. Core dataset. ~363 million rows.
+**Purpose**: 15-minute heartbeat energy readings from SparkMeter meters. Core dataset. ~471 million rows.
 
 **Energy field notes**: SparkMeter meters cannot confirm whether a heartbeat was received by the base station. To allow gap reconstruction, meters report both:
 - `kilowattHours` — energy consumed **during this 15-minute heartbeat period** (kWh) — primary consumption metric

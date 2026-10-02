@@ -78,8 +78,8 @@ ax.axvline(0.9*NOMINAL_V, color="#6b7280", linewidth=0.9, linestyle=":",
 ax.axvline(1.1*NOMINAL_V, color="#6b7280", linewidth=0.9, linestyle=":",
            label="_nolegend_")
 
-ax.text(0.02, 0.02, f"n = {total_pq:,} readings",
-        transform=ax.transAxes, fontsize=8, color="gray", va="bottom")
+# ax.text(0.02, 0.02, f"n = {total_pq:,} readings",
+#         transform=ax.transAxes, fontsize=8, color="gray", va="bottom")
 
 ax.set_xlim(V_LO, V_HI)
 ax.set_ylim(PF_LO, PF_HI)
