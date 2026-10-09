@@ -312,11 +312,11 @@ if args.side_by_side:
         ax.grid(axis="x", linewidth=0.3, alpha=0.3, which="minor")
         ax.legend(loc="upper left", fontsize=9)
         panel_site_info = f"{n_s} sites · " if n_s > 1 else ""
-        ax.text(
-            0.01, 0.88,
-            f"{panel_site_info}{n_cust} customers · {n_obs_panel:,} slots",
-            transform=ax.transAxes, va="top", fontsize=9, color="gray",
-        )
+        # ax.text(
+        #     0.01, 0.88,
+        #     f"{panel_site_info}{n_cust} customers · {n_obs_panel:,} slots",
+        #     transform=ax.transAxes, va="top", fontsize=9, color="gray",
+        # )
         ax.text(-0.07, 1.02, "ab"[panel_idx], transform=ax.transAxes,
                 fontsize=11, fontweight="bold", va="bottom", ha="right")
 
