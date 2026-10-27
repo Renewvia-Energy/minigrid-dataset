@@ -2,10 +2,7 @@
 """
 Compute SAIDI/SAIFI from VRM generation telemetry (vrmgeneration.parquet).
 
-A gap in VRM reporting is classified as a confirmed outage when the system does
-not resume with positive AC load or battery voltage after the gap — indicating
-the grid was down, not just VRM connectivity lost. Only the 16 VRM-instrumented
-projects are included; sites without VRM are excluded.
+A gap in VRM reporting is classified as a confirmed outage when the system does not resume with positive AC load or battery voltage after the gap — indicating the grid was down, not just VRM connectivity lost. Only the 16 VRM-instrumented projects are included; sites without VRM are excluded.
 
 VRM timestamps are UTC despite the column name "timestamp_local".
 

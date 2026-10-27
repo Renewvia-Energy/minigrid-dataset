@@ -5,7 +5,7 @@
 ---
 
 ## Table: customers
-**Purpose**: Core customer registry. One row per customer connection. 12,820 rows.
+**Purpose**: Core customer registry. One row per customer connection. 11,942 rows.
 
 | Column | Type | Release |
 |--------|------|---------|
@@ -71,7 +71,7 @@
 ---
 
 ## Table: minigridprojects
-**Purpose**: Mini-grid project specifications. One row per site. 26 rows total (23 real + 3 test placeholders that will be excluded from release).
+**Purpose**: Mini-grid project specifications. One row per site. 24 rows.
 
 | Column | Type | Release |
 |--------|------|---------|
@@ -201,7 +201,7 @@
 ---
 
 ## Table: sparkmetercustomers
-**Purpose**: Customer snapshot from the SparkMeter platform API. 8,955 rows.
+**Purpose**: Customer snapshot from the SparkMeter platform API. 9,110 rows.
 
 | Column | Type | Release |
 |--------|------|---------|
@@ -408,7 +408,7 @@
 ---
 
 ## Table: tariffs
-**Purpose**: Historical tariff rate schedule. One row per tariff name per base station per effective date. 870 rows.
+**Purpose**: Historical tariff rate schedule. One row per tariff name per base station per effective date. 969 rows.
 
 **Note**: Many early rows have `baseRate = 0` and `totalRate = 0` — placeholder rows created at system setup before rates were configured.
 
@@ -434,7 +434,7 @@
 ---
 
 ## Table: vrmgeneration
-**Purpose**: Victron Energy Remote Monitoring (VRM) system telemetry. ~1-minute resolution. 3.68 million rows covering 16 community mini-grid sites, August 2023 – December 2024.
+**Purpose**: Victron Energy Remote Monitoring (VRM) system telemetry. ~1-minute resolution. 2.89 million rows covering 16 community mini-grid sites, August 2023 – December 2024.
 
 **Release note**: Rows for "UBA Acme, Ogba, Lagos, Nigeria" and "Shell Oza 1" (commercial/industrial clients, not community mini-grids) are excluded from the release. The 3 test-placeholder projects (lat/long = 0,0) are also excluded.
 

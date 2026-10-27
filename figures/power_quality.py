@@ -3,13 +3,13 @@
 Extract power quality statistics from sparkmeterreadings for plotting.
 
 Streams all parquet files in data/sparkmeterreadings/, accumulates binned
-counts incrementally (no full dataset in memory), and saves:
+counts incrementally (no full dataset in memory), and saves per-country CSVs:
 
-  paper/graphics/power_quality_histograms.csv
+  paper/graphics/power_quality_histograms_{kenya,nigeria}.csv
       Binned counts for voltageMin, voltageAvg, and voltageMax per heartbeat.
       Columns: series, bin_center, count
 
-  paper/graphics/power_quality_scatter.csv
+  paper/graphics/power_quality_scatter_{kenya,nigeria}.csv
       2D binned counts of voltageAvg vs. powerFactorAvg.
       Columns: v_bin_center, pf_bin_center, count  (zero-count cells omitted)
 
@@ -49,10 +49,53 @@ PF_LO, PF_HI, PF_BINS =  0.0,   1.0, 200   # 0.005 per bin
 v_edges  = np.linspace(V_LO,  V_HI,  V_BINS  + 1)
 pf_edges = np.linspace(PF_LO, PF_HI, PF_BINS + 1)
 
-hist_vmin = np.zeros(V_BINS,            dtype=np.int64)
-hist_vavg = np.zeros(V_BINS,            dtype=np.int64)
-hist_vmax = np.zeros(V_BINS,            dtype=np.int64)
-hist_2d   = np.zeros((V_BINS, PF_BINS), dtype=np.int64)
+KENYA_SITES = frozenset([
+    "Kakuma_3A",
+    "Kalobeyei_Settlement_Village_1A",
+    "Kalobeyei_Settlement_Village_1B",
+    "Kalobeyei_Settlement_Village_2A",
+    "Kalobeyei_Settlement_Village_2B",
+    "Kalobeyei_Settlement_Village_3A",
+    "Kalobeyei_Town",
+    "Kangitan_Kori",
+    "Kapelbok",
+    "Katiko",
+    "Locheremoit",
+    "Lomekwi",
+    "Lorengelup",
+    "Nakukulas",
+    "Ndeda",
+    "Ngurunit",
+    "Olkiramatian",
+    "Oyamo",
+    "Ringiti",
+])
+
+NIGERIA_SITES = frozenset([
+    "Akipelai",
+    "Balep",
+    "Bendeghe-Afi",
+    "Ekong_Anaku",
+    "Emereoke",
+    "Oloibiri",
+    "Opu",
+    "Ozuzu",
+])
+
+accumulators = {
+    "kenya": {
+        "hist_vmin": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_vavg": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_vmax": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_2d":   np.zeros((V_BINS, PF_BINS), dtype=np.int64),
+    },
+    "nigeria": {
+        "hist_vmin": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_vavg": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_vmax": np.zeros(V_BINS,            dtype=np.int64),
+        "hist_2d":   np.zeros((V_BINS, PF_BINS), dtype=np.int64),
+    },
+}
 
 print("Loading sparkmeterreadings …")
 site_files = sorted(
@@ -60,6 +103,15 @@ site_files = sorted(
     if not f.stem.startswith("sparkmeterreadings_clean_")
 )
 for parquet_path in tqdm(site_files, desc="sites", unit="site"):
+    site = parquet_path.stem[len("sparkmeterreadings_"):]
+    if site in KENYA_SITES:
+        acc = accumulators["kenya"]
+    elif site in NIGERIA_SITES:
+        acc = accumulators["nigeria"]
+    else:
+        tqdm.write(f"  WARNING: unknown site {site!r}, skipping")
+        continue
+
     chunk = pq.read_table(parquet_path, columns=COLS).to_pandas()
     chunk = chunk[chunk["meter_type"] == "customer"]
     chunk = chunk[~(
@@ -77,49 +129,50 @@ for parquet_path in tqdm(site_files, desc="sites", unit="site"):
     valid_v  = chunk.loc[v_mask]
     valid_pq = chunk.loc[v_mask & pf_mask]
 
-    hist_vmin += np.histogram(valid_v["voltageMin"], bins=v_edges)[0].astype(np.int64)
-    hist_vavg += np.histogram(valid_v["voltageAvg"], bins=v_edges)[0].astype(np.int64)
-    hist_vmax += np.histogram(valid_v["voltageMax"], bins=v_edges)[0].astype(np.int64)
+    acc["hist_vmin"] += np.histogram(valid_v["voltageMin"], bins=v_edges)[0].astype(np.int64)
+    acc["hist_vavg"] += np.histogram(valid_v["voltageAvg"], bins=v_edges)[0].astype(np.int64)
+    acc["hist_vmax"] += np.histogram(valid_v["voltageMax"], bins=v_edges)[0].astype(np.int64)
 
     h2d, _, _ = np.histogram2d(
         valid_pq["voltageAvg"], valid_pq["powerFactorAvg"],
         bins=[v_edges, pf_edges],
     )
-    hist_2d += h2d.astype(np.int64)
+    acc["hist_2d"] += h2d.astype(np.int64)
 
-# ── Histogram CSV ─────────────────────────────────────────────────────────────
-
-v_centers = (v_edges[:-1] + v_edges[1:]) / 2
-rows = []
-for series, counts in [
-    ("voltageMin", hist_vmin),
-    ("voltageAvg", hist_vavg),
-    ("voltageMax", hist_vmax),
-]:
-    for center, count in zip(v_centers, counts):
-        rows.append({"series": series, "bin_center": round(float(center), 4), "count": int(count)})
-
-out = OUT_DIR / "power_quality_histograms.csv"
-pd.DataFrame(rows).to_csv(out, index=False)
-print(f"Saved {out}")
-
-# ── 2D scatter CSV (sparse: zero-count cells omitted) ─────────────────────────
-
+v_centers  = (v_edges[:-1]  + v_edges[1:])  / 2
 pf_centers = (pf_edges[:-1] + pf_edges[1:]) / 2
-vi, pi = np.where(hist_2d > 0)
-scatter_df = pd.DataFrame({
-    "v_bin_center":  np.round(v_centers[vi], 4),
-    "pf_bin_center": np.round(pf_centers[pi], 4),
-    "count":         hist_2d[vi, pi],
-})
 
-out = OUT_DIR / "power_quality_scatter.csv"
-scatter_df.to_csv(out, index=False)
-print(f"Saved {out}")
+for country, acc in accumulators.items():
+    # ── Histogram CSV ──────────────────────────────────────────────────────────
+    rows = []
+    for series, counts in [
+        ("voltageMin", acc["hist_vmin"]),
+        ("voltageAvg", acc["hist_vavg"]),
+        ("voltageMax", acc["hist_vmax"]),
+    ]:
+        for center, count in zip(v_centers, counts):
+            rows.append({"series": series, "bin_center": round(float(center), 4), "count": int(count)})
+
+    out = OUT_DIR / f"power_quality_histograms_{country}.csv"
+    pd.DataFrame(rows).to_csv(out, index=False)
+    print(f"Saved {out}")
+
+    # ── 2D scatter CSV (sparse: zero-count cells omitted) ──────────────────────
+    vi, pi = np.where(acc["hist_2d"] > 0)
+    scatter_df = pd.DataFrame({
+        "v_bin_center":  np.round(v_centers[vi], 4),
+        "pf_bin_center": np.round(pf_centers[pi], 4),
+        "count":         acc["hist_2d"][vi, pi],
+    })
+
+    out = OUT_DIR / f"power_quality_scatter_{country}.csv"
+    scatter_df.to_csv(out, index=False)
+    print(f"Saved {out}")
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
-total_v  = int(hist_vavg.sum())
-total_pq = int(hist_2d.sum())
-print(f"\n{total_v:,} heartbeats with valid voltage")
-print(f"{total_pq:,} heartbeats with valid voltage and power factor")
+for country, acc in accumulators.items():
+    total_v  = int(acc["hist_vavg"].sum())
+    total_pq = int(acc["hist_2d"].sum())
+    print(f"\n{country.capitalize()}: {total_v:,} heartbeats with valid voltage, "
+          f"{total_pq:,} with valid voltage and power factor")

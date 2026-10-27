@@ -68,6 +68,20 @@ def pseudonymize_series(s: pd.Series) -> pd.Series:
 # ── column specs ──────────────────────────────────────────────────────────────
 # Each entry: (columns_to_drop, columns_to_pseudonymize, extra_clean_fn)
 
+def clean_customers(df: pd.DataFrame) -> pd.DataFrame:
+    """Fix known project name variants and drop unprovisioned ghost records."""
+    project_name_fixes = {
+        "Kalobeyei Settlement Village 3 - Yelele": "Kalobeyei Settlement",
+        "kalobeyei town": "Kalobeyei Town",
+        "oyamo": "Oyamo",
+        "ringiti": "Ringiti",
+        "RIngiti": "Ringiti",
+    }
+    df = df.copy()
+    df["projectName"] = df["projectName"].replace(project_name_fixes)
+    return df[df["projectName"].notna()]
+
+
 def clean_payments(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize paymentProcessor casing; drop zero-date rows."""
     df = df[df["transactionDatetime"].notna()].copy()
@@ -142,6 +156,7 @@ PSEUDO_COLS = {
 
 # optional per-table cleaning functions (applied after drop/pseudo)
 CLEAN_FNS = {
+    "customers": clean_customers,
     "paymentconfirmations": clean_payments,
     "paymentvalidations": clean_payments,
 }
